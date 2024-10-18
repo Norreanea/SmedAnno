@@ -2,7 +2,7 @@
 
 Make the script executable:
 ```bash
-chmod +x rna_seq_pipeline.sh
+chmod +x rna_seq_pipeline.sh```
 
 Required inputs:
 - **rRNA Reference FASTA:** Path to rrna.fa.
@@ -25,7 +25,7 @@ To Run All Steps:
                       --dataDir /path/to/data \
                       --outputDir /path/to/output \
                       --threads 8 \
-                      --all
+                      --all```
 
 To Run Specific Steps (e.g., Steps 2, 4, and 6):
 ```bash
@@ -39,8 +39,8 @@ To Run Specific Steps (e.g., Steps 2, 4, and 6):
                       --dataDir /path/to/data \
                       --outputDir /path/to/output \
                       --threads 8 \
-                      --steps 2,4,6
+                      --steps 2,4,6```
 
 To Display Help:
 ```bash
-./rna_seq_pipeline.sh --help
+./rna_seq_pipeline.sh --help```
