@@ -37,7 +37,7 @@ show_help() {
 # Function to Check Dependencies
 # ---------------------------
 check_dependencies() {
-    local dependencies=("STAR" "Minimap2" "StringTie2" "gffcompare" "agat_convert_sp_gxf2gxf.pl" "agat_sp_add_introns.pl" "TransDecoder.LongOrfs" "TransDecoder.Predict" "blastp" "blastx" "pfam_scan.pl" "gffread")
+    local dependencies=("STAR" "Minimap2" "StringTie" "gffcompare" "agat_convert_sp_gxf2gxf.pl" "agat_sp_add_introns.pl" "TransDecoder.LongOrfs" "TransDecoder.Predict" "blastp" "blastx" "pfam_scan.pl" "gffread" "conda")
     for cmd in "${dependencies[@]}"; do
         if ! command -v "$cmd" &> /dev/null; then
             echo "Error: $cmd is not installed or not in PATH."
@@ -47,7 +47,7 @@ check_dependencies() {
 }
 
 # ---------------------------
-# Function for Step 2: rRNA Removal
+# Function for Step 2: Preprocessing - rRNA Removal
 # ---------------------------
 step2_rrna_removal() {
     echo "Starting Step 2: rRNA Removal"
@@ -134,22 +134,47 @@ step4_gene_transcript_assembly() {
 
         ALIGNED_BAM="${ALIGN_DIR}/${SAMPLE}_Aligned.sortedByCoord.out.bam"
 
-        # Reference-Based Annotation (RB) with StringTie2
-        echo "Running StringTie2 for Reference-Based Assembly (RB)"
+        # Reference-Based Annotation (RB) with StringTie2 v2.1.1
+        echo "Running StringTie2 v2.1.1 for Reference-Based Assembly (RB)"
+        source activate stringtie211
         stringtie -p ${THREADS} \
                   -G "${GENOME_GTF}" \
                   -c 1.5 \
                   -f 0.02 \
                   -o "${ASSEMBLY_DIR}/${SAMPLE}_RB.gtf" \
                   "${ALIGNED_BAM}"
+        source deactivate
 
-        # De Novo Annotation (DN) with StringTie2
-        echo "Running StringTie2 for De Novo Assembly (DN)"
+        # Reference-Based Annotation (RB) with StringTie2 v2.2.1 (Mixed Reads)
+        echo "Running StringTie2 v2.2.1 for Reference-Based Assembly (Mixed Reads)"
+        source activate stringtie221
+        stringtie --mix -p ${THREADS} \
+                  -G "${GENOME_GTF}" \
+                  -c 1.5 \
+                  -f 0.02 \
+                  -o "${ASSEMBLY_DIR}/${SAMPLE}_mix_RB.gtf" \
+                  "${ALIGNED_BAM}"
+        source deactivate
+
+        # De Novo Annotation (DN) with StringTie2 v2.1.1
+        echo "Running StringTie2 v2.1.1 for De Novo Assembly (DN)"
+        source activate stringtie211
         stringtie -p ${THREADS} \
                   -c 1.5 \
                   -f 0.02 \
                   -o "${ASSEMBLY_DIR}/${SAMPLE}_DN.gtf" \
                   "${ALIGNED_BAM}"
+        source deactivate
+
+        # De Novo Annotation (DN) with StringTie2 v2.2.1 (Mixed Reads)
+        echo "Running StringTie2 v2.2.1 for De Novo Assembly (Mixed Reads)"
+        source activate stringtie221
+        stringtie --mix -p ${THREADS} \
+                  -c 1.5 \
+                  -f 0.02 \
+                  -o "${ASSEMBLY_DIR}/${SAMPLE}_mix_DN.gtf" \
+                  "${ALIGNED_BAM}"
+        source deactivate
 
         echo "Transcript assembly completed for Sample: ${SAMPLE}"
     done
@@ -158,56 +183,61 @@ step4_gene_transcript_assembly() {
 }
 
 # ---------------------------
-# Function for Step 5: Merging Transcripts Across Samples
+# Function for Step 5: Merge Annotation from Step 1
 # ---------------------------
-step5_merging_transcripts() {
-    echo "Starting Step 5: Merging Transcripts Across Samples"
+step5_merging_transcripts_step1() {
+    echo "Starting Step 5: Merge Annotation from Step 1"
 
-    # Create list files for RB and DN assemblies
-    RB_LIST="${MERGE_DIR}/sample_list_RB.txt"
-    DN_LIST="${MERGE_DIR}/sample_list_DN.txt"
+    # Activate StringTie 2.2.1 environment
+    source activate stringtie221
 
-    # Empty or create the list files
-    > "${RB_LIST}"
-    > "${DN_LIST}"
-
+    # Create a list of GTF files from Step 1 (Reference-Based, Short Reads)
+    echo "Creating list of GTF files from Step 1 (RB, Short Reads)"
+    > "${LIST_STEP1_GTF}"  # Empty the file
     for SAMPLE in "${SAMPLES[@]}"; do
-        echo "${ASSEMBLY_DIR}/${SAMPLE}_RB.gtf" >> "${RB_LIST}"
-        echo "${ASSEMBLY_DIR}/${SAMPLE}_DN.gtf" >> "${DN_LIST}"
+        echo "${ASSEMBLY_DIR}/${SAMPLE}_RB.gtf" >> "${LIST_STEP1_GTF}"
     done
 
-    # Merge Reference-Based Assemblies
-    echo "Merging Reference-Based Assemblies"
+    # Merge annotations from Step 1
+    echo "Merging Reference-Based Assemblies (Step 1)"
     stringtie --merge -p ${THREADS} \
-             -G "${GENOME_GTF}" \
-             -o "${MERGE_DIR}/merged_RB.gtf" \
-             "${RB_LIST}"
+             -G "${REFERENCE_GTF}" \
+             -o "${MERGE_DIR}/merged_step5.gtf" \
+             "${LIST_STEP1_GTF}"
 
-    # Merge De Novo Assemblies
-    echo "Merging De Novo Assemblies"
-    stringtie --merge -p ${THREADS} \
-             -o "${MERGE_DIR}/merged_DN.gtf" \
-             "${DN_LIST}"
+    # Deactivate the environment
+    source deactivate
 
-    echo "Step 5 Completed: Merging Transcripts"
+    echo "Step 5 Completed: Merge Annotation from Step 1"
 }
 
 # ---------------------------
-# Function for Step 6: Combining Reference-Based and De Novo Annotations
+# Function for Step 6: Merge Annotation from Step 5 and Step 2
 # ---------------------------
-step6_combining_annotations() {
-    echo "Starting Step 6: Combining Reference-Based and De Novo Annotations"
+step6_merging_transcripts_step2() {
+    echo "Starting Step 6: Merge Annotation from Step 5 and Step 2"
 
-    FINAL_MERGED_GTF="${ANNOTATION_DIR}/final_merged.gtf"
+    # Activate StringTie 2.2.1 environment
+    source activate stringtie221
 
-    echo "Combining RB and DN merged GTFs with Reference Annotation"
+    # Create a list of GTF files from Step 2 (Reference-Based, Mixed Reads)
+    echo "Creating list of GTF files from Step 2 (RB, Mixed Reads)"
+    > "${LIST_STEP2_GTF}"  # Empty the file
+    for SAMPLE in "${SAMPLES[@]}"; do
+        echo "${ASSEMBLY_DIR}/${SAMPLE}_mix_RB.gtf" >> "${LIST_STEP2_GTF}"
+    done
+
+    # Merge annotations from Step 5 and Step 2
+    echo "Merging Step 5 and Step 2 Annotations"
     stringtie --merge -p ${THREADS} \
-             -G "${GENOME_GTF}" \
-             -o "${FINAL_MERGED_GTF}" \
-             "${MERGE_DIR}/merged_RB.gtf" \
-             "${MERGE_DIR}/merged_DN.gtf"
+             -G "${MERGE_DIR}/merged_step5.gtf" \
+             -o "${MERGE_DIR}/merged_step6.gtf" \
+             "${LIST_STEP2_GTF}"
 
-    echo "Step 6 Completed: Combining Annotations"
+    # Deactivate the environment
+    source deactivate
+
+    echo "Step 6 Completed: Merge Annotation from Step 5 and Step 2"
 }
 
 # ---------------------------
@@ -224,7 +254,7 @@ step7_isoform_comparison() {
                --chr-stats \
                --strict-match \
                -o "${COMP_OUTPUT_PREFIX}" \
-               "${ANNOTATION_DIR}/final_merged.gtf"
+               "${MERGE_DIR}/merged_step6.gtf"
 
     echo "Step 7 Completed: Isoform Comparison and Annotation"
 }
@@ -268,14 +298,11 @@ step9_functional_annotation() {
     TransDecoder.LongOrfs -t "${TRANSCRIPTS_FA}" -m ${MIN_ORF_LENGTH}
 
     # Predict likely coding regions (optional)
-    # Uncomment the following line if you want to run TransDecoder.Predict
-    # TransDecoder.Predict -t "${TRANSCRIPTS_FA}"
+    echo "Running TransDecoder.Predict to identify likely coding regions"
+    TransDecoder.Predict -t "${TRANSCRIPTS_FA}" --single_best_orf -o "${FUNCTIONAL_DIR}/TransDecoder"
 
     # Extract longest ORFs
     echo "Extracting longest ORFs"
-    TransDecoder.Predict -t "${TRANSCRIPTS_FA}" --single_best_orf -o "${FUNCTIONAL_DIR}/TransDecoder"
-
-    # Assuming TransDecoder outputs longest ORFs to a specific directory
     cp "${FUNCTIONAL_DIR}/TransDecoder/longest_orfs.pep" "${LONGEST_ORFS_PEP}"
     cp "${FUNCTIONAL_DIR}/TransDecoder/longest_orfs.fa" "${LONGEST_ORFS_FA}"
 
@@ -297,7 +324,7 @@ step9_functional_annotation() {
     # Domain Identification with PFAM Scan
     echo "Running PFAM Scan to identify protein domains"
     pfam_scan.pl -fasta "${LONGEST_ORFS_PEP}" \
-                -dir "${PFAM_DB_DIR}" \
+                -dir "${PFAM_DB}" \
                 -outfile "${FUNCTIONAL_DIR}/pfam_results.out"
 
     # Filtering Criteria
@@ -454,9 +481,9 @@ mkdir -p "${PREPROC_DIR}" "${ALIGN_DIR}" "${ASSEMBLY_DIR}" "${MERGE_DIR}" "${ANN
 # ---------------------------
 # Set rRNA Reference Index (STAR requires genomeDir)
 # ---------------------------
-# If rRNA_ref_index is a separate STAR index, set it; otherwise, index it here
-# Assuming the user provides the STAR index for rRNA
-
+# Assuming the user provides the STAR index for rRNA as part of genomeDir
+# Alternatively, you may need to build it here if not provided
+# For simplicity, we'll assume it's provided
 RRNA_REF_INDEX="${GENOME_DIR}/rRNA_STAR_index"
 
 # ---------------------------
@@ -479,8 +506,8 @@ if [ "$RUN_ALL" = true ]; then
     step2_rrna_removal
     step3_read_alignment
     step4_gene_transcript_assembly
-    step5_merging_transcripts
-    step6_combining_annotations
+    step5_merging_transcripts_step1
+    step6_merging_transcripts_step2
     step7_isoform_comparison
     step8_gtf_correction
     step9_functional_annotation
@@ -497,10 +524,10 @@ else
                 step4_gene_transcript_assembly
                 ;;
             5)
-                step5_merging_transcripts
+                step5_merging_transcripts_step1
                 ;;
             6)
-                step6_combining_annotations
+                step6_merging_transcripts_step2
                 ;;
             7)
                 step7_isoform_comparison
