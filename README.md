@@ -1,7 +1,8 @@
 # Genome-annotation-pipeline
 
 Make the script executable:
-```chmod +x rna_seq_pipeline.sh
+```bash
+chmod +x rna_seq_pipeline.sh
 
 Required inputs:
 - **rRNA Reference FASTA:** Path to rrna.fa.
