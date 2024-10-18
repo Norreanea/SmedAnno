@@ -14,7 +14,7 @@ Required inputs:
 - **rRNA STAR Index:** Ensure you have a STAR index for rRNA references.
 - **Genome STAR Index:** Ensure you have a STAR index for the genome.
 
-To Run All Steps:
+To Run all steps:
 ```bash
 ./rna_seq_pipeline.sh --genomeDir /path/to/genomeDir \
                       --rrnaRef /path/to/rrna.fa \
@@ -29,7 +29,7 @@ To Run All Steps:
                       --all
 ```
 
-To Run Specific Steps (e.g., Steps 2, 4, and 6):
+To run specific steps (e.g., Steps 2, 4, and 6):
 ```bash
 ./rna_seq_pipeline.sh --genomeDir /path/to/genomeDir \
                       --rrnaRef /path/to/rrna.fa \
@@ -44,7 +44,7 @@ To Run Specific Steps (e.g., Steps 2, 4, and 6):
                       --steps 2,4,6
 ```
 
-To Display Help:
+To display help:
 ```bash
 ./rna_seq_pipeline.sh --help
 ```
