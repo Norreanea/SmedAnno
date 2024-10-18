@@ -1,5 +1,11 @@
 # Genome-annotation-pipeline
 
+Conda environments:
+- **stringtie211:** Contains StringTie version 2.1.1 for steps using short reads.
+- **stringtie221:** Contains StringTie version 2.2.1 for steps using mixed reads and merging annotations.
+
+Please make sure that Conda is installed and the environments stringtie211 and stringtie221 are properly set up with the respective StringTie versions.
+
 Make the script executable:
 ```bash
 chmod +x rna_seq_pipeline.sh
