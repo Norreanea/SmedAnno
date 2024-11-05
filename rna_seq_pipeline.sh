@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =====================================================================
-# Enhanced RNA-Seq Bioinformatics Pipeline with User Prompts and Modular Steps
+# Enhanced RNA-Seq Bioinformatics Pipeline
 # =====================================================================
 
 set -e  # Exit immediately if a command exits with a non-zero status
