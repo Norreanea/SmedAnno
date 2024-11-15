@@ -45,7 +45,7 @@ show_help() {
     echo ""
     echo "Mandatory Options for Specific Steps:"
     echo "  --finalGTF PATH               Path to final GTF file (required for Functional Annotation only)"
-    echo "  --alignDir PATH                 Path to directory containing BAM files (required for Gene and Transcript Assembly only)"
+    echo "  --alignDir PATH               Path to directory containing BAM files (required for Gene and Transcript Assembly only)"
     echo "  --SR_RB_gtf_dir PATH          Directory containing SR_RB.gtf files (required for Merging Assemblies)"
     echo "  --SR_DN_gtf_dir PATH          Directory containing SR_DN.gtf files (optional for Merging Assemblies)"
     echo "  --MR_RB_gtf_dir PATH          Directory containing MR_RB.gtf files (optional for Merging Assemblies)"
@@ -66,7 +66,7 @@ show_help() {
     echo "  --minOrfLength N              Minimum ORF length for TransDecoder (default: 100)"
     echo "  --steps LIST                  Comma-separated list of steps to run (1-8, include 5.1)"
     echo "  --all                         Run all steps sequentially"
-    echo "  --functionalMethods METHODS    Comma-separated list of functional annotation methods to apply (BLASTp,BLASTx,PFAM; default: all)"
+    echo "  --functionalMethods METHODS   Comma-separated list of functional annotation methods to apply (BLASTp,BLASTx,PFAM; default: all)"
     echo "  --help                        Display this help message and exit"
     echo ""
     echo "Steps:"
@@ -94,7 +94,7 @@ show_help() {
     echo "    $0 --SR_RB_gtf_dir ./gtf/SR_RB --SR_DN_gtf_dir ./gtf/SR_DN --outputDir ./output --threads 4 --steps 4,5"
     echo ""
     echo "  Run Functional Annotation with specific methods:"
-    echo "    $0 --finalGTF final_annotation.gtf --outputDir ./output --threads 4 --steps 8 --functionalMethods BLASTp,PFAM"
+    echo "    $0 --finalGTF final_annotation.gtf --outputDir ./output --threads 4 --steps 8 --functionalMethods BLASTp,PFAM --genomeRef genome.fa"
     exit 1
 }
 
