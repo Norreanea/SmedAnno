@@ -24,7 +24,7 @@ Usage: ./rna_seq_pipeline.bash [OPTIONS]
 
 Mandatory Options for Specific Steps:
   --finalGTF PATH               Path to final GTF file (required for Functional Annotation only)
-  --alignDir PATH                 Path to directory containing BAM files (required for Gene and Transcript Assembly only)
+  --alignDir PATH               Path to directory containing BAM files (required for Gene and Transcript Assembly only)
   --SR_RB_gtf_dir PATH          Directory containing SR_RB.gtf files (required for Merging Assemblies)
   --SR_DN_gtf_dir PATH          Directory containing SR_DN.gtf files (optional for Merging Assemblies)
   --MR_RB_gtf_dir PATH          Directory containing MR_RB.gtf files (optional for Merging Assemblies)
@@ -73,5 +73,5 @@ Examples:
     ./rna_seq_pipeline.bash --SR_RB_gtf_dir ./gtf/SR_RB --SR_DN_gtf_dir ./gtf/SR_DN --outputDir ./output --threads 4 --steps 4,5
 
   Run Functional Annotation with specific methods:
-    ./rna_seq_pipeline.bash --finalGTF final_annotation.gtf --outputDir ./output --threads 4 --steps 8 --functionalMethods BLASTp,PFAM
+    ./rna_seq_pipeline.bash --finalGTF final_annotation.gtf --outputDir ./output --threads 4 --steps 8 --functionalMethods BLASTp,PFAM --genomeRef genome.fa
 ```
