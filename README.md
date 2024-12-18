@@ -114,17 +114,17 @@ Usage: SmedAnno [OPTIONS]
 ## Output
 Upon successful execution, SmedAnno generates a structured output directory containing:
 
--Preprocessing Outputs: rRNA-removed reads.
--Alignment Outputs: BAM files aligned to the reference genome.
--Assembly Outputs: Assembled gene and transcript GTF files.
--Merged Annotations: Combined GTF annotations.
--Filtered Annotations: High-quality GTF files after filtering.
--Functional Annotations: BLAST and PFAM results integrated into the final annotation.
--Logs: Detailed logs for each pipeline step, facilitating troubleshooting and verification.
+- Preprocessing Outputs: rRNA-removed reads.
+- Alignment Outputs: BAM files aligned to the reference genome.
+- Assembly Outputs: Assembled gene and transcript GTF files.
+- Merged Annotations: Combined GTF annotations.
+- Filtered Annotations: High-quality GTF files after filtering.
+- Functional Annotations: BLAST and PFAM results integrated into the final annotation.
+- Logs: Detailed logs for each pipeline step, facilitating troubleshooting and verification.
 
 ## License
 This project is licensed under the MIT License.
 
 ## Acknowledgements
-**Bioinformatics Tools:** SmedAnno integrates several powerful tools including StringTie, STAR, minimap2, AGAT, TransDecoder, BLAST, and PFAM.
-**Open-Source Community:** Special thanks to the developers and contributors of the open-source software utilized in this pipeline.
+- **Bioinformatics Tools:** SmedAnno integrates several powerful tools including StringTie, STAR, minimap2, AGAT, TransDecoder, BLAST, and PFAM.
+- **Open-Source Community:** Special thanks to the developers and contributors of the open-source software utilized in this pipeline.
