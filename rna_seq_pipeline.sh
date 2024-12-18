@@ -1,8 +1,9 @@
 #!/bin/bash
 
 # =====================================================================
-# Comprehensive RNA-Seq Bioinformatics Pipeline with Flexible Step Execution
+# Comprehensive RNA-Seq annotation pipeline 
 # =====================================================================
+# Master script 
 
 set -e  # Exit immediately if a command exits with a non-zero status
 set -o pipefail  # Pipeline returns the exit status of the last command to fail
@@ -41,7 +42,7 @@ echo_blue() {
 # Function to Display Help
 # ---------------------------
 show_help() {
-    echo "Usage: $0 [OPTIONS]"
+    echo "Usage: SmedAnno [OPTIONS]"
     echo ""
     echo "Mandatory Options for Specific Steps:"
     echo "  --finalGTF PATH               Path to final GTF file (required for Functional Annotation only)"
@@ -66,7 +67,7 @@ show_help() {
     echo "  --minOrfLength N              Minimum ORF length for TransDecoder (default: 100)"
     echo "  --steps LIST                  Comma-separated list of steps to run (1-8, include 5.1)"
     echo "  --all                         Run all steps sequentially"
-    echo "  --functionalMethods METHODS   Comma-separated list of functional annotation methods to apply (BLASTp,BLASTx,PFAM; default: all)"
+    echo "  --functionalMethods METHODS    Comma-separated list of functional annotation methods to apply (BLASTp,BLASTx,PFAM; default: all)"
     echo "  --help                        Display this help message and exit"
     echo ""
     echo "Steps:"
@@ -75,26 +76,27 @@ show_help() {
     echo "  3 - Gene and Transcript Assembly"
     echo "  4 - Merge Reference-Based Assemblies"
     echo "  5 - Merge De Novo Assemblies and Create Pre-Final Annotation"
-    echo "  5.1 - Filter Transcripts with Excessively Long Exons or Genomic Spans"
-    echo "  6 - Isoform Comparison and Annotation"
-    echo "  7 - GTF File Correction and Enhancement"
-    echo "  8 - Functional Annotation and Filtering"
+    echo "  6 - Filter Transcripts with Excessively Long Exons or Genomic Spans"
+    echo "  7 - Isoform Comparison and Annotation"
+    echo "  8 - GTF File Correction and Enhancement"
+    echo "  9 - Functional Annotation and Filtering"
+	echo "  10 - Integrate Functional Annotation (including Overlapped Genes and Transcripts, Reversed Duplicates, Fragmmented and Chimeric Genes Identification )"
     echo ""
     echo "Examples:"
     echo "  Run all steps:"
-    echo "    $0 --genomeRef genome.fa --dataDir ./data --outputDir ./output --threads 4 --all"
+    echo "    SmedAnno --genomeRef genome.fa --dataDir ./data --outputDir ./output --threads 4 --all"
     echo ""
     echo "  Run Steps 1 and 2 only (rRNA Removal and Read Alignment):"
-    echo "    $0 --genomeRef genome.fa --dataDir ./data --outputDir ./output --threads 4 --steps 1,2"
+    echo "    SmedAnno --genomeRef genome.fa --dataDir ./data --outputDir ./output --threads 4 --steps 1,2"
     echo ""
     echo "  Run Only Step 3 (Gene and Transcript Assembly) with BAM files:"
-    echo "    $0 --alignDir ./bam_files --outputDir ./output --threads 4 --steps 3"
+    echo "    SmedAnno --alignDir ./bam_files --outputDir ./output --threads 4 --steps 3"
     echo ""
     echo "  Run Merging Assemblies Steps 4 and 5 with specific GTF directories:"
-    echo "    $0 --SR_RB_gtf_dir ./gtf/SR_RB --SR_DN_gtf_dir ./gtf/SR_DN --outputDir ./output --threads 4 --steps 4,5"
+    echo "    SmedAnno --SR_RB_gtf_dir ./gtf/SR_RB --SR_DN_gtf_dir ./gtf/SR_DN --outputDir ./output --threads 4 --steps 4,5"
     echo ""
     echo "  Run Functional Annotation with specific methods:"
-    echo "    $0 --finalGTF final_annotation.gtf --outputDir ./output --threads 4 --steps 8 --functionalMethods BLASTp,PFAM --genomeRef genome.fa"
+    echo "    SmedAnno --finalGTF final_annotation.gtf --outputDir ./output --threads 4 --steps 8 --functionalMethods BLASTp,PFAM --genomeRef genome.fa"
     exit 1
 }
 
@@ -858,10 +860,10 @@ step1_rrna_removal() {
     }
 
     # ---------------------------
-    # Function for Step 5.1: Filter Out Transcripts with Excessively Long Exons or Genomic Spans
+    # Function for Step 6: Filter Out Transcripts with Excessively Long Exons or Genomic Spans
     # ---------------------------
-    step5_filter_transcripts() {
-        echo_green "Starting Step 5.1: Filtering Transcripts with Excessively Long Exons or Genomic Spans"
+    step6_filter_transcripts() {
+        echo_green "Starting Step 6: Filtering Transcripts with Excessively Long Exons or Genomic Spans"
         conda activate stringtie221
         # Define the maximum exon and transcript lengths
         MAX_EXON_LENGTH=10000
@@ -922,7 +924,7 @@ step1_rrna_removal() {
             echo_green "No transcripts exceeding defined thresholds were found. No filtering necessary."
             cp "${PREFINAL_GTF}" "${FILTERED_GTF}"
             echo_green "Filtered GTF is identical to the pre-final GTF."
-            echo_green "Step 5.1 Completed: Filtering Transcripts with Excessively Long Exons or Genomic Spans"
+            echo_green "Step 6 Completed: Filtering Transcripts with Excessively Long Exons or Genomic Spans"
             return
         fi
 
@@ -961,14 +963,14 @@ step1_rrna_removal() {
             exit 1
         fi
 
-        echo_green "Step 5.1 Completed: Filtering Transcripts with Excessively Long Exons or Genomic Spans"
+        echo_green "Step 6 Completed: Filtering Transcripts with Excessively Long Exons or Genomic Spans"
     }
 
     # ---------------------------
-    # Function for Step 6: Isoform Comparison and Annotation
+    # Function for Step 7: Isoform Comparison and Annotation
     # ---------------------------
-    step6_isoform_comparison() {
-        echo_blue  "Starting Step 6: Isoform Comparison and Annotation"
+    step7_isoform_comparison() {
+        echo_blue  "Starting Step 7: Isoform Comparison and Annotation"
 
         # Determine which GTF to use
         if [ -f "${MERGE_DIR}/prefinal_annotation_filtered.gtf" ]; then
@@ -976,7 +978,7 @@ step1_rrna_removal() {
         elif [ -n "${finalGTF}" ] && [ -f "${finalGTF}" ]; then
             ANNOTATED_GTF="${finalGTF}"
         else
-            echo_red  "Pre-final annotation GTF not found. Skipping Step 6."
+            echo_red  "Pre-final annotation GTF not found. Skipping Step 7."
             return
         fi
 
@@ -1002,14 +1004,14 @@ step1_rrna_removal() {
 
         conda deactivate
 
-        echo_blue  "Step 6 Completed: Isoform Comparison and Annotation"
+        echo_blue  "Step 7 Completed: Isoform Comparison and Annotation"
     }
 
     # ---------------------------
-    # Function for Step 7: GTF File Correction and Enhancement
+    # Function for Step 8: GTF File Correction and Enhancement
     # ---------------------------
-    step7_gtf_correction() {
-        echo_blue  "Starting Step 7: GTF Correction and Enhancement"
+    step8_gtf_correction() {
+        echo_blue  "Starting Step 8: GTF Correction and Enhancement"
 
         conda activate stringtie221
 
@@ -1021,7 +1023,7 @@ step1_rrna_removal() {
         elif [ -n "${finalGTF}" ] && [ -f "${finalGTF}" ]; then
             ANNOTATED_GTF="${finalGTF}"
         else
-            echo_red  "No GTF file found for correction. Skipping Step 7."
+            echo_red  "No GTF file found for correction. Skipping Step 8."
             conda deactivate
             return
         fi
@@ -1037,21 +1039,21 @@ step1_rrna_removal() {
 
         conda deactivate
 
-        echo_blue  "Step 7 Completed: GTF Correction and Enhancement"
+        echo_blue  "Step 8 Completed: GTF Correction and Enhancement"
     }
 
     # ---------------------------
-    # Function for Step 8: Functional Annotation and Filtering
+    # Function for Step 9: Functional Annotation and Filtering
     # ---------------------------
-    step8_functional_annotation() {
-        echo_blue  "Starting Step 8: Functional Annotation and Filtering"
+    step9_functional_annotation() {
+        echo_blue  "Starting Step 9: Functional Annotation and Filtering"
 
         if [ -f "${ANNOTATION_DIR}/corrected_with_introns.gtf" ]; then
             ANNOTATED_GTF="${ANNOTATION_DIR}/corrected_with_introns.gtf"
         elif [ -n "${finalGTF}" ] && [ -f "${finalGTF}" ]; then
             ANNOTATED_GTF="${finalGTF}"
         else
-            echo_red  "No GTF file found for functional annotation. Skipping Step 8."
+            echo_red  "No GTF file found for functional annotation. Skipping Step 9."
             return
         fi
 
@@ -1163,8 +1165,56 @@ step1_rrna_removal() {
 
         echo_green  "Final filtered GTF file created at ${FUNCTIONAL_DIR}/final_annotation.gtf"
 
-        echo_blue  "Step 8 Completed: Functional Annotation and Filtering"
+        echo_blue  "Step 9 Completed: Functional Annotation and Filtering"
     }
+	# ---------------------------
+    # Function for Step 10: Integrate Functional Annotation (R Script)
+    # ---------------------------
+
+	step10_integrate_functional_annotation() {
+		echo_blue "Starting Step 10: Integrate Functional Annotation (R Script)"
+		
+		# Define paths
+		FUNCTIONAL_SCRIPT="./scripts/functional_annotation.R"  
+		ANNOTATION_DIR="${OUTPUT_DIR}/annotation"
+		FUNCTIONAL_DIR="${OUTPUT_DIR}/functional_annotation"
+		GENOME_REF="${GENOME_REF}"  # Already defined earlier
+		OUTPUT_DIR="${OUTPUT_DIR}"  # Already defined earlier
+
+		# Check if R script exists
+		if [ ! -f "${FUNCTIONAL_SCRIPT}" ]; then
+			echo_red "Error: R script not found at ${FUNCTIONAL_SCRIPT}"
+			exit 1
+		fi
+
+		# Run the R script with required arguments
+		if [ -n "$GENOME_REF" ]; then
+		  Rscript functional_annotation.R --annotation_dir "$ANNOTATION_DIR" \
+									   --functional_dir "$FUNCTIONAL_DIR" \
+									   --genome_ref "$GENOME_REF" \
+									   --output_dir "$OUTPUT_DIR" \
+									   >> "$LOGS_DIR/functional_annotation.log" 2>&1
+		else
+		  Rscript functional_annotation.R --annotation_dir "$ANNOTATION_DIR" \
+									   --functional_dir "$FUNCTIONAL_DIR" \
+									   --output_dir "$OUTPUT_DIR" \
+									   >> "$LOGS_DIR/functional_annotation.log" 2>&1
+        fi
+		# Check if R script ran successfully
+		if [ $? -ne 0 ]; then
+			echo_red "Error: Functional annotation R script failed. Check ${LOGS_DIR}/functional_annotation.log for details."
+			exit 1
+		else
+			echo_green "Functional annotation completed successfully."
+		fi
+
+		echo_blue "Step 10 Completed: Integrate Functional Annotation (R Script)"
+	}
+
+	# Add Step 10 to the pipeline
+	if [[ " ${STEPS_TO_RUN[*]} " =~ " 10 " ]]; then
+		step10_integrate_functional_annotation
+	fi
 
     # ---------------------------
     # Parse Command-Line Arguments with getopt
@@ -1220,7 +1270,7 @@ step1_rrna_removal() {
             --steps) IFS=',' read -ra STEPS <<< "$2"; shift 2 ;;
             --all) RUN_ALL=true; shift ;;
             --functionalMethods) FUNCTIONAL_METHODS="$2"; shift 2 ;;
-            --help) show_help ;;
+            -h|--help) show_help ;;
             --) shift; break ;;
             *) echo "Unknown parameter passed: $1"; show_help ;;
         esac
@@ -1324,16 +1374,17 @@ step1_rrna_removal() {
         [3]=step3_gene_transcript_assembly
         [4]=step4_merging_transcripts_I
         [5]=step5_merging_transcripts_II
-        [5.1]=step5_filter_transcripts
-        [6]=step6_isoform_comparison
-        [7]=step7_gtf_correction
-        [8]=step8_functional_annotation
+        [6]=step6_filter_transcripts
+        [7]=step7_isoform_comparison
+        [8]=step8_gtf_correction
+        [9]=step9_functional_annotation
+		[10]=step10_integrate_functional_annotation
     )
 
     # ---------------------------
     # Define Step Order
     # ---------------------------
-    STEP_ORDER=(1 2 3 4 5 5.1 6 7 8)
+    STEP_ORDER=(1 2 3 4 5 6 7 8 9 10)
 
     # ---------------------------
     # Determine Steps to Run and Validate Dependencies
@@ -1348,7 +1399,7 @@ step1_rrna_removal() {
         # Validate that steps are within allowed range
         for STEP in "${STEPS[@]}"; do
             if [[ ! " ${STEP_ORDER[*]} " =~ " ${STEP} " ]]; then
-                echo_red "Error: Invalid step number '${STEP}'. Must be between 1 and 8 (include 5.1)."
+                echo_red "Error: Invalid step number '${STEP}'. Must be between 1 and 10."
                 exit 1
             fi
         done
@@ -1382,30 +1433,38 @@ step1_rrna_removal() {
                     exit 1
                 fi
                 ;;
-            4|5|5.1)
+            4|5|6)
                 # For merging assemblies, require specific GTF directories
                 if [ -z "${SR_RB_gtf_dir}" ] && [ -z "${SR_DN_gtf_dir}" ] && [ -z "${MR_RB_gtf_dir}" ] && [ -z "${MR_DN_gtf_dir}" ]; then
-                    echo_red "Error: At least one of --SR_RB_gtf_dir, --SR_DN_gtf_dir, --MR_RB_gtf_dir, or --MR_DN_gtf_dir must be provided when running Steps 4, 5, or 5.1 (Merging Assemblies)."
+                    echo_red "Error: At least one of --SR_RB_gtf_dir, --SR_DN_gtf_dir, --MR_RB_gtf_dir, or --MR_DN_gtf_dir must be provided when running Steps 4, 5, or 6 (Merging Assemblies)."
                     exit 1
                 fi
                 ;;
-            6|7)
+            7|8)
                 if [ -z "${finalGTF}" ] && [ ! -f "${MERGE_DIR}/prefinal_annotation.gtf" ]; then
-                    echo_red "Error: --finalGTF must be provided or prefinal_annotation.gtf must exist when running Steps 6 or 7 (Isoform Comparison and Annotation, GTF Correction)."
+                    echo_red "Error: --finalGTF must be provided or prefinal_annotation.gtf must exist when running Steps 7 or 8 (Isoform Comparison and Annotation, GTF Correction)."
                     exit 1
                 fi
                 ;;
-            8)
+            9)
                 if [ -z "${finalGTF}" ] && [ ! -f "${ANNOTATION_DIR}/corrected_with_introns.gtf" ] && [ ! -f "${MERGE_DIR}/prefinal_annotation_filtered.gtf" ]; then
-                    echo_red "Error: --finalGTF must be provided when running Step 8 (Functional Annotation and Filtering)."
+                    echo_red "Error: --finalGTF must be provided when running Step 9 (Functional Annotation and Filtering)."
                     exit 1
                 fi
 				if [ -z "${genomeRef}" ] && [ ! -f "${GENOME_REF}" ]; then
-                    echo_red "Error: --genomeRef must be provided when running Step 8 (Functional Annotation and Filtering)."
+                    echo_red "Error: --genomeRef must be provided when running Step 9 (Functional Annotation and Filtering)."
                     exit 1
                 fi
 				
                 ;;
+			10)
+                    # Validate that Step 9 has been run
+                    if [ ! -f "${MERGE_DIR}/prefinal_annotation_filtered.gtf" ] && [ ! -f "${ANNOTATION_DIR}/corrected_with_introns.gtf" ]; then
+                        echo_red "Error: Pre-final annotation GTF is missing. Ensure Steps 1-9 have been successfully completed before running Step 10."
+                        exit 1
+                    fi
+                    
+                    ;;
             *)
                 ;;
         esac
