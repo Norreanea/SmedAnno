@@ -20,7 +20,7 @@ chmod 777 /tmp/temp_star
 # ---------------------------
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-BLUE='\033[0;34m'
+BLUE='\033[1;34m'
 NC='\033[0m' # No Color
 
 # ---------------------------
@@ -45,12 +45,12 @@ show_help() {
     echo "Usage: SmedAnno [OPTIONS]"
     echo ""
     echo "Mandatory Options for Specific Steps:"
-    echo "  --finalGTF PATH               Path to final GTF file (required for Functional Annotation only)"
-    echo "  --alignDir PATH               Path to directory containing BAM files (required for Gene and Transcript Assembly only)"
-    echo "  --SR_RB_gtf_dir PATH          Directory containing SR_RB.gtf files (required for Merging Assemblies)"
-    echo "  --SR_DN_gtf_dir PATH          Directory containing SR_DN.gtf files (optional for Merging Assemblies)"
-    echo "  --MR_RB_gtf_dir PATH          Directory containing MR_RB.gtf files (optional for Merging Assemblies)"
-    echo "  --MR_DN_gtf_dir PATH          Directory containing MR_DN.gtf files (optional for Merging Assemblies)"
+    echo "  --finalGTF PATH               Path to final GTF file (optional, required for Functional Annotation only)"
+    echo "  --alignDir PATH               Path to directory containing BAM files (optional, required for Gene and Transcript Assembly only)"
+    echo "  --SR_RB_gtf_dir PATH          Directory containing SR_RB.gtf files (optional, required for Merging Assemblies)"
+    echo "  --SR_DN_gtf_dir PATH          Directory containing SR_DN.gtf files (optional, required for Merging Assemblies)"
+    echo "  --MR_RB_gtf_dir PATH          Directory containing MR_RB.gtf files (optional, required for Merging Assemblies)"
+    echo "  --MR_DN_gtf_dir PATH          Directory containing MR_DN.gtf files (optional, required for Merging Assemblies)"
     echo ""
     echo "General Mandatory Options (if applicable based on steps selected):"
     echo "  --genomeRef PATH              Path to genome reference FASTA file"
@@ -354,31 +354,31 @@ step1_rrna_removal() {
             # Remove rRNA from long reads using minimap2
             if [[ "${MIX_LONG_READ}" == *.gz ]]; then
                 minimap2 -t "${THREADS}" -ax map-pb "${RRNA_REF}" <(zcat "${MIX_LONG_READ}") | \
-                    samtools view -Sb - > "${alignDir}/${SAMPLE}_long_aligned.bam"
+                    samtools view -Sb - > "${ALIGN_DIR}/${SAMPLE}_long_aligned.bam"
             else
                 minimap2 -t "${THREADS}" -ax map-pb "${RRNA_REF}" "${MIX_LONG_READ}" | \
-                    samtools view -Sb - > "${alignDir}/${SAMPLE}_long_aligned.bam"
+                    samtools view -Sb - > "${ALIGN_DIR}/${SAMPLE}_long_aligned.bam"
             fi
 
             # **Sort Long Reads BAM:**
-            if [ -f "${alignDir}/${SAMPLE}_long_aligned.bam" ]; then
+            if [ -f "${ALIGN_DIR}/${SAMPLE}_long_aligned.bam" ]; then
                 echo_green  "Sorting long reads BAM file for Sample: ${SAMPLE}"
-                samtools sort -@ "${THREADS}" -o "${alignDir}/${SAMPLE}_long_aligned.sorted.bam" "${alignDir}/${SAMPLE}_long_aligned.bam"
-                rm "${alignDir}/${SAMPLE}_long_aligned.bam"  # Remove unsorted BAM
-                mv "${alignDir}/${SAMPLE}_long_aligned.sorted.bam" "${alignDir}/${SAMPLE}_long_aligned.bam"  # Rename to original name
+                samtools sort -@ "${THREADS}" -o "${ALIGN_DIR}/${SAMPLE}_long_aligned.sorted.bam" "${ALIGN_DIR}/${SAMPLE}_long_aligned.bam"
+                rm "${ALIGN_DIR}/${SAMPLE}_long_aligned.bam"  # Remove unsorted BAM
+                mv "${ALIGN_DIR}/${SAMPLE}_long_aligned.sorted.bam" "${ALIGN_DIR}/${SAMPLE}_long_aligned.bam"  # Rename to original name
                 echo_green  "Long reads BAM sorted for Sample: ${SAMPLE}"
             fi
 
             # **Extract Unmapped (Non-rRNA) Long Reads and Convert to FASTQ:**
             echo_green  "Extracting unmapped (non-rRNA) long reads for Sample: ${SAMPLE}"
-            samtools view -b -f 4 "${alignDir}/${SAMPLE}_long_aligned.bam" > "${alignDir}/${SAMPLE}_long_unmapped.bam"
+            samtools view -b -f 4 "${ALIGN_DIR}/${SAMPLE}_long_aligned.bam" > "${ALIGN_DIR}/${SAMPLE}_long_unmapped.bam"
 
             echo_green  "Converting unmapped long reads BAM to paired FASTQ for Sample: ${SAMPLE}"
             samtools fastq "${MIX_NON_RRNA_LONG_READ}" \
-                          "${alignDir}/${SAMPLE}_long_unmapped.bam"
+                          "${ALIGN_DIR}/${SAMPLE}_long_unmapped.bam"
 
             # **Clean Up Intermediate Files:**
-            rm "${alignDir}/${SAMPLE}_long_aligned.bam" "${alignDir}/${SAMPLE}_long_unmapped.bam"
+            rm "${ALIGN_DIR}/${SAMPLE}_long_aligned.bam" "${ALIGN_DIR}/${SAMPLE}_long_unmapped.bam"
 
             echo_green  "Non-rRNA long reads extracted and converted to FASTQ for Sample: ${SAMPLE}"
         done
@@ -457,11 +457,11 @@ step1_rrna_removal() {
                      --readFilesIn "${READ1}" "${READ2}" \
                      --readFilesCommand "${READ_FILES_CMD}" \
                      --outSAMtype BAM SortedByCoordinate \
-                     --outFileNamePrefix "${alignDir}/${SAMPLE}_STAR_" \
+                     --outFileNamePrefix "${ALIGN_DIR}/${SAMPLE}_STAR_" \
                      --outTmpDir /tmp/temp_star/temp
 
                 # Define paths
-                ALIGNED_SORTED_BAM="${alignDir}/${SAMPLE}_STAR_Aligned.sortedByCoord.out.bam"
+                ALIGNED_SORTED_BAM="${ALIGN_DIR}/${SAMPLE}_STAR_Aligned.sortedByCoord.out.bam"
 
                 # Check if STAR produced the BAM file
                 if [ ! -f "${ALIGNED_SORTED_BAM}" ]; then
@@ -473,10 +473,10 @@ step1_rrna_removal() {
                 echo_green  "Adding XS attribute to BAM file for Sample: ${SAMPLE}"
                 samtools view -h "${ALIGNED_SORTED_BAM}" | \
                     awk -v strType=2 -f ./tagXSstrandedData.awk | \
-                    samtools view -bSq 10 -F 4 - > "${alignDir}/${SAMPLE}_STAR_Aligned.sortedByCoord.outXS.bam"
+                    samtools view -bSq 10 -F 4 - > "${ALIGN_DIR}/${SAMPLE}_STAR_Aligned.sortedByCoord.outXS.bam"
 
                 # Remove intermediate BAM file
-                rm "${ALIGNED_SORTed_BAM}"
+                rm "${ALIGNED_SORTED_BAM}"
 
                 echo_green  "Alignment completed for Short-Only Sample: ${SAMPLE}"
             done
@@ -525,11 +525,11 @@ step1_rrna_removal() {
                      --outFilterMismatchNmax 0 \
                      --outReadsUnmapped Fastx \
                      --outSAMtype BAM SortedByCoordinate \
-                     --outFileNamePrefix "${alignDir}/${SAMPLE}_STAR_" \
+                     --outFileNamePrefix "${ALIGN_DIR}/${SAMPLE}_STAR_" \
                      --outTmpDir /tmp/temp_star/temp
 
                 # Define paths
-                ALIGNED_SHORT_SORTED_BAM="${alignDir}/${SAMPLE}_STAR_Aligned.sortedByCoord.out.bam"
+                ALIGNED_SHORT_SORTED_BAM="${ALIGN_DIR}/${SAMPLE}_STAR_Aligned.sortedByCoord.out.bam"
 
                 # Check if STAR produced the BAM file
                 if [ ! -f "${ALIGNED_SHORT_SORTED_BAM}" ]; then
@@ -541,10 +541,10 @@ step1_rrna_removal() {
                 echo_green  "Adding XS attribute to short BAM file for Sample: ${SAMPLE}"
                 samtools view -h "${ALIGNED_SHORT_SORTED_BAM}" | \
                     awk -v strType=2 -f ./tagXSstrandedData.awk | \
-                    samtools view -bSq 10 -F 4 - > "${alignDir}/${SAMPLE}_STAR_Aligned.sortedByCoord.outXS.bam"
+                    samtools view -bSq 10 -F 4 - > "${ALIGN_DIR}/${SAMPLE}_STAR_Aligned.sortedByCoord.outXS.bam"
 
                 # Remove intermediate BAM file
-                rm "${ALIGNED_SHORT_SORTed_BAM}"
+                rm "${ALIGNED_SHORT_SORTED_BAM}"
 
                 # Align long reads using minimap2
                 if [ -n "${RRNA_REF}" ]; then
@@ -557,18 +557,18 @@ step1_rrna_removal() {
                     echo_green  "Running minimap2 aligner for Mixed Sample: ${SAMPLE} (Long Reads)"
                     if [[ "${MIX_LONG_READ}" == *.gz ]]; then
                         minimap2 -t "${THREADS}" -ax map-pb "${GENOME_REF}" <(zcat "${MIX_LONG_READ}") | \
-                            samtools view -Sb - > "${alignDir}/${SAMPLE}_long_aligned.bam"
+                            samtools view -Sb - > "${ALIGN_DIR}/${SAMPLE}_long_aligned.bam"
                     else
                         minimap2 -t "${THREADS}" -ax map-pb "${GENOME_REF}" "${MIX_LONG_READ}" | \
-                            samtools view -Sb - > "${alignDir}/${SAMPLE}_long_aligned.bam"
+                            samtools view -Sb - > "${ALIGN_DIR}/${SAMPLE}_long_aligned.bam"
                     fi
 
                     # **New Sorting Step for Long Reads BAM**
-                    if [ -f "${alignDir}/${SAMPLE}_long_aligned.bam" ]; then
+                    if [ -f "${ALIGN_DIR}/${SAMPLE}_long_aligned.bam" ]; then
                         echo_green  "Sorting long reads BAM file for Sample: ${SAMPLE}"
-                        samtools sort -@ "${THREADS}" -o "${alignDir}/${SAMPLE}_long_aligned.sorted.bam" "${alignDir}/${SAMPLE}_long_aligned.bam"
-                        rm "${alignDir}/${SAMPLE}_long_aligned.bam"  # Remove unsorted BAM
-                        mv "${alignDir}/${SAMPLE}_long_aligned.sorted.bam" "${alignDir}/${SAMPLE}_long_aligned.bam"  # Rename to original name
+                        samtools sort -@ "${THREADS}" -o "${ALIGN_DIR}/${SAMPLE}_long_aligned.sorted.bam" "${ALIGN_DIR}/${SAMPLE}_long_aligned.bam"
+                        rm "${ALIGN_DIR}/${SAMPLE}_long_aligned.bam"  # Remove unsorted BAM
+                        mv "${ALIGN_DIR}/${SAMPLE}_long_aligned.sorted.bam" "${ALIGN_DIR}/${SAMPLE}_long_aligned.bam"  # Rename to original name
                         echo_green  "Long reads BAM sorted for Sample: ${SAMPLE}"
                     fi
                 else
@@ -589,8 +589,8 @@ step1_rrna_removal() {
     step3_gene_transcript_assembly() {
         echo_blue  "Starting Step 3: Gene and Transcript Assembly"
 
-        # Ensure alignDir is provided and exists
-        if [ -z "${alignDir}" ] || [ ! -d "${alignDir}" ]; then
+        # Ensure ALIGN_DIR is provided and exists
+        if [ -z "${ALIGN_DIR}" ] || [ ! -d "${ALIGN_DIR}" ]; then
             echo_red  "Error: --alignDir must be provided and must exist when running Step 3 (Gene and Transcript Assembly)."
             exit 1
         fi
@@ -600,7 +600,7 @@ step1_rrna_removal() {
             for SAMPLE in "${SHORT_ONLY_SAMPLES[@]}"; do
                 echo_green  "Assembling transcripts for Short-Only Sample: ${SAMPLE}"
 
-                ALIGNED_SORTED_BAM="${alignDir}/${SAMPLE}_STAR_Aligned.sortedByCoord.outXS.bam"
+                ALIGNED_SORTED_BAM="${ALIGN_DIR}/${SAMPLE}_STAR_Aligned.sortedByCoord.outXS.bam"
 
                 # Reference-Based Annotation (RB) with StringTie2 v2.1.1 (short reads)
                 if [ -n "${GENOME_GTF}" ]; then
@@ -610,7 +610,7 @@ step1_rrna_removal() {
                               -G "${GENOME_GTF}" \
                               -c 1.5 \
                               -f 0.02 \
-                              -o "${ASSEMBLY_DIR}/${SAMPLE}_SR_RB.gtf" \
+                              -o "${SR_RB_GTF_DIR}/${SAMPLE}_SR_RB.gtf" \
                               "${ALIGNED_SORTED_BAM}"
                     conda deactivate
                 fi
@@ -621,7 +621,7 @@ step1_rrna_removal() {
                 stringtie -p "${THREADS}" \
                           -c 1.5 \
                           -f 0.02 \
-                          -o "${ASSEMBLY_DIR}/${SAMPLE}_SR_DN.gtf" \
+                          -o "${SR_DN_GTF_DIR}/${SAMPLE}_SR_DN.gtf" \
                           "${ALIGNED_SORTED_BAM}"
                 conda deactivate
 
@@ -634,14 +634,14 @@ step1_rrna_removal() {
             for SAMPLE in "${MIX_SAMPLES[@]}"; do
                 echo_green  "Assembling transcripts for Mixed Sample: ${SAMPLE}"
 
-                ALIGNED_SHORT_SORTED_BAM="${alignDir}/${SAMPLE}_STAR_Aligned.sortedByCoord.outXS.bam"
-                ALIGNED_LONG_BAM="${alignDir}/${SAMPLE}_long_aligned.bam"  # This BAM is now sorted
+                ALIGNED_SHORT_SORTED_BAM="${ALIGN_DIR}/${SAMPLE}_STAR_Aligned.sortedByCoord.outXS.bam"
+                ALIGNED_LONG_BAM="${ALIGN_DIR}/${SAMPLE}_long_aligned.bam"  # This BAM is now sorted
                 
                 echo_green  "Short reads BAM: ${ALIGNED_SHORT_SORTED_BAM}"
                 echo_green  "Long reads BAM: ${ALIGNED_LONG_BAM}"
 
-                if [ ! -f "${ALIGNED_SHORT_SORTed_BAM}" ]; then
-                    echo_red  "Error: Short reads BAM file ${ALIGNED_SHORT_SORTed_BAM} does not exist."
+                if [ ! -f "${ALIGNED_SHORT_SORTED_BAM}" ]; then
+                    echo_red  "Error: Short reads BAM file ${ALIGNED_SHORT_SORTED_BAM} does not exist."
                     exit 1
                 fi
 
@@ -659,8 +659,8 @@ step1_rrna_removal() {
                               -G "${GENOME_GTF}" \
                               -c 1.5 \
                               -f 0.02 \
-                              -o "${ASSEMBLY_DIR}/${SAMPLE}_MR_RB.gtf" \
-                              "${ALIGNED_SHORT_SORTed_BAM}" "${ALIGNED_LONG_BAM}"
+                              -o "${MR_RB_GTF_DIR}/${SAMPLE}_MR_RB.gtf" \
+                              "${ALIGNED_SHORT_SORTED_BAM}" "${ALIGNED_LONG_BAM}"
                     conda deactivate
                 fi
 
@@ -670,8 +670,8 @@ step1_rrna_removal() {
                 stringtie --mix -p "${THREADS}" \
                           -c 1.5 \
                           -f 0.02 \
-                          -o "${ASSEMBLY_DIR}/${SAMPLE}_MR_DN.gtf" \
-                          "${ALIGNED_SHORT_SORTed_BAM}" "${ALIGNED_long_bam}"
+                          -o "${MR_DN_GTF_DIR}/${SAMPLE}_MR_DN.gtf" \
+                          "${ALIGNED_SHORT_SORTED_BAM}" "${ALIGNED_LONG_BAM}"
                 conda deactivate
 
                 echo_green  "Transcript assembly completed for Mixed Sample: ${SAMPLE}"
@@ -696,12 +696,12 @@ step1_rrna_removal() {
         conda activate stringtie221
 
         # Merge Reference-Based Assemblies for Short Reads (SR)
-        if [ -d "${SR_RB_gtf_dir}" ]; then
+        if [ -d "${SR_RB_GTF_DIR}" ]; then
             echo_green "Merging Reference-Based Assemblies for Short Reads (SR)"
             LIST_SR_RB_GTF="${MERGE_DIR}/SR_RB_gtf_list.txt"
             > "${LIST_SR_RB_GTF}"  # Empty the file
 
-            for GTF_FILE in "${SR_RB_gtf_dir}"/*.gtf; do
+            for GTF_FILE in "${SR_RB_GTF_DIR}"/*.gtf; do
                 if [ -f "${GTF_FILE}" ] && [ -s "${GTF_FILE}" ] && grep -qv "^#" "${GTF_FILE}"; then
                     echo "${GTF_FILE}" >> "${LIST_SR_RB_GTF}"
                 else
@@ -719,34 +719,34 @@ step1_rrna_removal() {
                 echo_red "No valid SR_RB GTF files available for merging. Skipping."
             fi
         else
-            echo_red "Directory for SR_RB.gtf files (${SR_RB_gtf_dir}) not found or empty. Skipping."
+            echo_red "Directory for SR_RB.gtf files (${SR_RB_GTF_DIR}) not found or empty. Skipping."
         fi
 
         # Merge Reference-Based Assemblies for Mixed Reads (MR)
-        if [ -d "${MR_RB_gtf_dir}" ]; then
+        if [ -d "${MR_RB_GTF_DIR}" ]; then
             echo_green "Merging Reference-Based Assemblies for Mixed Reads (MR)"
             LIST_MR_RB_GTF="${MERGE_DIR}/MR_RB_gtf_list.txt"
             > "${LIST_MR_RB_GTF}"  # Empty the file
 
-            for GTF_FILE in "${MR_RB_gtf_dir}"/*.gtf; do
+            for GTF_FILE in "${MR_RB_GTF_DIR}"/*.gtf; do
                 if [ -f "${GTF_FILE}" ] && [ -s "${GTF_FILE}" ] && grep -qv "^#" "${GTF_FILE}"; then
-                    echo "${GTF_FILE}" >> "${LIST_MR_RB_gTF}"
+                    echo "${GTF_FILE}" >> "${LIST_MR_RB_GTF}"
                 else
                     echo_red "Warning: GTF file ${GTF_FILE} is missing, empty, or contains no transcripts. Skipping."
                 fi
             done
 
-            if [ -s "${LIST_MR_RB_gTF}" ]; then
+            if [ -s "${LIST_MR_RB_GTF}" ]; then
                 stringtie --merge -p "${THREADS}" \
                           -G "${GENOME_GTF}" \
                           -o "${MERGE_DIR}/merged_MR_RB.gtf" \
-                          "${LIST_MR_RB_gTF}"
+                          "${LIST_MR_RB_GTF}"
                 echo_green "Merged MR_RB.gtf created successfully."
             else
                 echo_red "No valid MR_RB GTF files available for merging. Skipping."
             fi
         else
-            echo_red "Directory for MR_RB.gtf files (${MR_RB_gtf_dir}) not found or empty. Skipping."
+            echo_red "Directory for MR_RB.gtf files (${MR_RB_GTF_DIR}) not found or empty. Skipping."
         fi
 
         # Deactivate the environment
@@ -764,55 +764,55 @@ step1_rrna_removal() {
         conda activate stringtie221
 
         # Merge De Novo Assemblies for Short Reads (SR)
-        if [ -d "${SR_DN_gtf_dir}" ]; then
+        if [ -d "${SR_DN_GTF_DIR}" ]; then
             echo_green "Merging De Novo Assemblies for Short Reads (SR)"
             LIST_SR_DN_GTF="${MERGE_DIR}/SR_DN_gtf_list.txt"
             > "${LIST_SR_DN_GTF}"  # Empty the file
 
-            for GTF_FILE in "${SR_DN_gtf_dir}"/*.gtf; do
+            for GTF_FILE in "${SR_DN_GTF_DIR}"/*.gtf; do
                 if [ -f "${GTF_FILE}" ] && [ -s "${GTF_FILE}" ] && grep -qv "^#" "${GTF_FILE}"; then
-                    echo "${GTF_FILE}" >> "${LIST_SR_DN_gTF}"
+                    echo "${GTF_FILE}" >> "${LIST_SR_DN_GTF}"
                 else
                     echo_red "Warning: GTF file ${GTF_FILE} is missing, empty, or contains no transcripts. Skipping."
                 fi
             done
 
-            if [ -s "${LIST_SR_DN_gTF}" ]; then
+            if [ -s "${LIST_SR_DN_GTF}" ]; then
                 stringtie --merge -p "${THREADS}" \
                           -o "${MERGE_DIR}/merged_SR_DN.gtf" \
-                          "${LIST_SR_DN_gTF}"
+                          "${LIST_SR_DN_GTF}"
                 echo_green "Merged SR_DN.gtf created successfully."
             else
                 echo_red "No valid SR_DN GTF files available for merging. Skipping."
             fi
         else
-            echo_red "Directory for SR_DN.gtf files (${SR_DN_gtf_dir}) not found or empty. Skipping."
+            echo_red "Directory for SR_DN.gtf files (${SR_DN_GTF_DIR}) not found or empty. Skipping."
         fi
 
         # Merge De Novo Assemblies for Mixed Reads (MR)
-        if [ -d "${MR_DN_gtf_dir}" ]; then
+        if [ -d "${MR_DN_GTF_DIR}" ]; then
             echo_green "Merging De Novo Assemblies for Mixed Reads (MR)"
             LIST_MR_DN_GTF="${MERGE_DIR}/MR_DN_gtf_list.txt"
-            > "${LIST_MR_DN_gTF}"  # Empty the file
+            > "${LIST_MR_DN_GTF}"  # Empty the file
 
-            for GTF_FILE in "${MR_DN_gtf_dir}"/*.gtf; do
+            for GTF_FILE in "${MR_DN_GTF_DIR}"/*.gtf; do
                 if [ -f "${GTF_FILE}" ] && [ -s "${GTF_FILE}" ] && grep -qv "^#" "${GTF_FILE}"; then
-                    echo "${GTF_FILE}" >> "${LIST_MR_DN_gTF}"
+                    echo "${GTF_FILE}" >> "${LIST_MR_DN_GTF}"
                 else
                     echo_red "Warning: GTF file ${GTF_FILE} is missing, empty, or contains no transcripts. Skipping."
                 fi
             done
 
-            if [ -s "${LIST_MR_DN_gTF}" ]; then
+            if [ -s "${LIST_MR_DN_GTF}" ]; then
                 stringtie --merge -p "${THREADS}" \
                           -o "${MERGE_DIR}/merged_MR_DN.gtf" \
-                          "${LIST_MR_DN_gTF}"
+                          "${LIST_MR_DN_GTF}"
                 echo_green "Merged MR_DN.gtf created successfully."
             else
                 echo_red "No valid MR_DN GTF files available for merging. Skipping."
             fi
         else
-            echo_red "Directory for MR_DN.gtf files (${MR_DN_gtf_dir}) not found or empty. Skipping."
+            echo_red "Directory for MR_DN.gtf files (${MR_DN_GTF_DIR}) not found or empty. Skipping."
         fi
 
         # Merge all assemblies into pre-final annotation
@@ -1175,10 +1175,10 @@ step1_rrna_removal() {
 		echo_blue "Starting Step 10: Integrate Functional Annotation (R Script)"
 		
 		# Define paths
-		FUNCTIONAL_SCRIPT="./scripts/functional_annotation.R"  
+		FUNCTIONAL_SCRIPT="../scripts/functional_annotation.R"  
 		ANNOTATION_DIR="${OUTPUT_DIR}/annotation"
 		FUNCTIONAL_DIR="${OUTPUT_DIR}/functional_annotation"
-		GENOME_REF="${GENOME_REF}"  # Already defined earlier
+		GENOME_GTF="${GENOME_GTF}"  # Already defined earlier
 		OUTPUT_DIR="${OUTPUT_DIR}"  # Already defined earlier
 
 		# Check if R script exists
@@ -1188,14 +1188,14 @@ step1_rrna_removal() {
 		fi
 
 		# Run the R script with required arguments
-		if [ -n "$GENOME_REF" ]; then
-		  Rscript functional_annotation.R --annotation_dir "$ANNOTATION_DIR" \
+		if [ -n "$GENOME_GTF" ]; then
+		  Rscript ../scripts/functional_annotation.R --annotation_dir "$ANNOTATION_DIR" \
 									   --functional_dir "$FUNCTIONAL_DIR" \
-									   --genome_ref "$GENOME_REF" \
+									   --genome_gtf "$GENOME_GTF" \
 									   --output_dir "$OUTPUT_DIR" \
 									   >> "$LOGS_DIR/functional_annotation.log" 2>&1
 		else
-		  Rscript functional_annotation.R --annotation_dir "$ANNOTATION_DIR" \
+		  Rscript ../scripts/functional_annotation.R --annotation_dir "$ANNOTATION_DIR" \
 									   --functional_dir "$FUNCTIONAL_DIR" \
 									   --output_dir "$OUTPUT_DIR" \
 									   >> "$LOGS_DIR/functional_annotation.log" 2>&1
@@ -1220,17 +1220,17 @@ step1_rrna_removal() {
     # Parse Command-Line Arguments with getopt
     # ---------------------------
     # Initialize variables with default values
-    GENOME_DIR="./outputDir/genome"
+    #GENOME_DIR="./outputDir/genome"
     RRNA_REF=""
     RRNA_REF_INDEX=""
     GENOME_REF=""
     GENOME_GTF=""
-    alignDir=""
+    ALIGN_DIR=""
     finalGTF=""
-    SR_RB_gtf_dir=""
-    SR_DN_gtf_dir=""
-    MR_RB_gtf_dir=""
-    MR_DN_gtf_dir=""
+    SR_RB_GTF_DIR=""
+    SR_DN_GTF_DIR=""
+    MR_RB_GTF_DIR=""
+    MR_DN_GTF_DIR=""
     BLAST_DB_SwissProt=""
     PFAM_DB=""
     DATA_DIR=""
@@ -1242,7 +1242,7 @@ step1_rrna_removal() {
     FUNCTIONAL_METHODS="BLASTp,BLASTx,PFAM"  # Default: all methods
 
     # Use getopt for parsing long options
-    if ! PARSED_OPTIONS=$(getopt -n "$0" -o "" --long genomeDir:,rrnaRef:,genomeRef:,genomeGTF:,alignDir:,finalGTF:,SR_RB_gtf_dir:,SR_DN_gtf_dir:,MR_RB_gtf_dir:,MR_DN_gtf_dir:,blastDB_SwissProt:,pfamDB:,dataDir:,outputDir:,threads:,steps:,all,help,minOrfLength:,functionalMethods: -- "$@"); then
+    if ! PARSED_OPTIONS=$(getopt -n "$0" -o "" --long genomeDir:,rrnaRef:,genomeRef:,genomeGTF:,ALIGN_DIR:,finalGTF:,SR_RB_gtf_dir:,SR_DN_gtf_dir:,MR_RB_gtf_dir:,MR_DN_gtf_dir:,blastDB_SwissProt:,pfamDB:,dataDir:,outputDir:,threads:,steps:,all,help,minOrfLength:,functionalMethods: -- "$@"); then
         show_help
     fi
 
@@ -1255,12 +1255,12 @@ step1_rrna_removal() {
             --rrnaRef) RRNA_REF="$2"; shift 2 ;;
             --genomeRef) GENOME_REF="$2"; shift 2 ;;
             --genomeGTF) GENOME_GTF="$2"; shift 2 ;;
-            --alignDir) alignDir="$2"; shift 2 ;;
+            --alignDir) ALIGN_DIR="$2"; shift 2 ;;
             --finalGTF) finalGTF="$2"; shift 2 ;;
-            --SR_RB_gtf_dir) SR_RB_gtf_dir="$2"; shift 2 ;;
-            --SR_DN_gtf_dir) SR_DN_gtf_dir="$2"; shift 2 ;;
-            --MR_RB_gtf_dir) MR_RB_gtf_dir="$2"; shift 2 ;;
-            --MR_DN_gtf_dir) MR_DN_gtf_dir="$2"; shift 2 ;;
+            --SR_RB_gtf_dir) SR_RB_GTF_DIR="$2"; shift 2 ;;
+            --SR_DN_gtf_dir) SR_DN_GTF_DIR="$2"; shift 2 ;;
+            --MR_RB_gtf_dir) MR_RB_GTF_DIR="$2"; shift 2 ;;
+            --MR_DN_gtf_dir) MR_DN_GTF_DIR="$2"; shift 2 ;;
             --blastDB_SwissProt) BLAST_DB_SwissProt="$2"; shift 2 ;;
             --pfamDB) PFAM_DB="$2"; shift 2 ;;
             --dataDir) DATA_DIR="$2"; shift 2 ;;
@@ -1296,15 +1296,24 @@ step1_rrna_removal() {
     # ---------------------------
     # Set Up Output Directories
     # ---------------------------
-    PREPROC_DIR="${OUTPUT_DIR}/preprocessing"
-    alignDir="${OUTPUT_DIR}/alignment"
-    ASSEMBLY_DIR="${OUTPUT_DIR}/assembly"
-    MERGE_DIR="${OUTPUT_DIR}/merging"
-    ANNOTATION_DIR="${OUTPUT_DIR}/annotation"
-    FUNCTIONAL_DIR="${OUTPUT_DIR}/functional_annotation"
-    LOGS_DIR="${OUTPUT_DIR}/logs"
+	if [ "$RUN_ALL" = true ]; then
+		GENOME_DIR="${OUTPUT_DIR}/genome"
+		PREPROC_DIR="${OUTPUT_DIR}/preprocessing"
+		ALIGN_DIR="${OUTPUT_DIR}/alignment"
+		ASSEMBLY_DIR="${OUTPUT_DIR}/assembly"
+		MERGE_DIR="${OUTPUT_DIR}/merging"
+		ANNOTATION_DIR="${OUTPUT_DIR}/annotation"
+		FUNCTIONAL_DIR="${OUTPUT_DIR}/functional_annotation"
+		LOGS_DIR="${OUTPUT_DIR}/logs"
+		SR_RB_GTF_DIR="${ASSEMBLY_DIR}/SR_RB"
+		SR_DN_GTF_DIR="${ASSEMBLY_DIR}/SR_DN"
+		MR_RB_GTF_DIR="${ASSEMBLY_DIR}/MR_RB"
+		MR_DN_GTF_DIR="${ASSEMBLY_DIR}/MR_DN"
+		
+		mkdir -p "${PREPROC_DIR}" "${ALIGN_DIR}" "${ASSEMBLY_DIR}" "${MERGE_DIR}" "${ANNOTATION_DIR}" "${FUNCTIONAL_DIR}" "${LOGS_DIR}" "${SR_RB_GTF_DIR}" "${SR_DN_GTF_DIR}" "${MR_RB_GTF_DIR}" "${MR_DN_GTF_DIR}"
+	fi
 
-    mkdir -p "${PREPROC_DIR}" "${alignDir}" "${ASSEMBLY_DIR}" "${MERGE_DIR}" "${ANNOTATION_DIR}" "${FUNCTIONAL_DIR}" "${LOGS_DIR}"
+    
 
     # ---------------------------
     # Set rRNA Reference Index (STAR requires genomeDir)
@@ -1413,10 +1422,10 @@ step1_rrna_removal() {
     for STEP in "${STEPS_TO_RUN[@]}"; do
         case "$STEP" in
             1|2)
-                if [ -z "${genomeRef}" ]; then
-                    echo_red "Error: --genomeRef must be provided when running Step 8 (Functional Annotation and Filtering)."
-                    exit 1
-                fi
+                #if [ -z "${genomeRef}" ]; then
+                #    echo_red "Error: --genomeRef must be provided when running Step 8 (Functional Annotation and Filtering)."
+                #    exit 1
+                #fi
 				if [ -z "${DATA_DIR}" ]; then
 					echo_red  "Error: --dataDir is required."
 					show_help
@@ -1428,42 +1437,51 @@ step1_rrna_removal() {
 				fi
                 ;;
             3)
-                if [ -z "${alignDir}" ] || [ ! -d "${alignDir}" ]; then
-                    echo_red "Error: --alignDir must be provided and must exist when running Step 3 (Gene and Transcript Assembly)."
-                    exit 1
-                fi
+			    if [ "$RUN_ALL" = false ]; then
+					if [ -z "${ALIGN_DIR}" ] || [ ! -d "${ALIGN_DIR}" ]; then
+						echo_red "Error: --alignDir must be provided and must exist when running Step 3 (Gene and Transcript Assembly)."
+						exit 1
+					fi
+				fi
                 ;;
             4|5|6)
-                # For merging assemblies, require specific GTF directories
-                if [ -z "${SR_RB_gtf_dir}" ] && [ -z "${SR_DN_gtf_dir}" ] && [ -z "${MR_RB_gtf_dir}" ] && [ -z "${MR_DN_gtf_dir}" ]; then
-                    echo_red "Error: At least one of --SR_RB_gtf_dir, --SR_DN_gtf_dir, --MR_RB_gtf_dir, or --MR_DN_gtf_dir must be provided when running Steps 4, 5, or 6 (Merging Assemblies)."
-                    exit 1
-                fi
+			    if [ "$RUN_ALL" = false ]; then
+					# For merging assemblies, require specific GTF directories
+					if [ -z "${SR_RB_GTF_DIR}" ] && [ -z "${SR_DN_GTF_DIR}" ] && [ -z "${MR_RB_GTF_DIR}" ] && [ -z "${MR_DN_GTF_DIR}" ]; then
+						echo_red "Error: At least one of --SR_RB_gtf_dir, --SR_DN_gtf_dir, --MR_RB_gtf_dir, or --MR_DN_gtf_dir must be provided when running Steps 4, 5, or 6 (Merging Assemblies)."
+						exit 1
+					fi
+				fi
                 ;;
             7|8)
-                if [ -z "${finalGTF}" ] && [ ! -f "${MERGE_DIR}/prefinal_annotation.gtf" ]; then
-                    echo_red "Error: --finalGTF must be provided or prefinal_annotation.gtf must exist when running Steps 7 or 8 (Isoform Comparison and Annotation, GTF Correction)."
-                    exit 1
-                fi
+			    if [ "$RUN_ALL" = false ]; then
+					if [ -z "${finalGTF}" ] && [ ! -f "${MERGE_DIR}/prefinal_annotation.gtf" ]; then
+						echo_red "Error: --finalGTF must be provided or prefinal_annotation.gtf must exist when running Steps 7 or 8 (Isoform Comparison and Annotation, GTF Correction)."
+						exit 1
+					fi
+				fi
                 ;;
-            9)
-                if [ -z "${finalGTF}" ] && [ ! -f "${ANNOTATION_DIR}/corrected_with_introns.gtf" ] && [ ! -f "${MERGE_DIR}/prefinal_annotation_filtered.gtf" ]; then
-                    echo_red "Error: --finalGTF must be provided when running Step 9 (Functional Annotation and Filtering)."
-                    exit 1
-                fi
-				if [ -z "${genomeRef}" ] && [ ! -f "${GENOME_REF}" ]; then
-                    echo_red "Error: --genomeRef must be provided when running Step 9 (Functional Annotation and Filtering)."
-                    exit 1
-                fi
+            9)  
+			    if [ "$RUN_ALL" = false ]; then
+					if [ -z "${finalGTF}" ] && [ ! -f "${ANNOTATION_DIR}/corrected_with_introns.gtf" ] && [ ! -f "${MERGE_DIR}/prefinal_annotation_filtered.gtf" ]; then
+						echo_red "Error: --finalGTF must be provided when running Step 9 (Functional Annotation and Filtering)."
+						exit 1
+					fi
+				fi
+				#if [ -z "${genomeRef}" ] && [ ! -f "${GENOME_REF}" ]; then
+                #    echo_red "Error: --genomeRef must be provided when running Step 9 (Functional Annotation and Filtering)."
+                #    exit 1
+                #fi
 				
                 ;;
 			10)
+			    if [ "$RUN_ALL" = false ]; then
                     # Validate that Step 9 has been run
                     if [ ! -f "${MERGE_DIR}/prefinal_annotation_filtered.gtf" ] && [ ! -f "${ANNOTATION_DIR}/corrected_with_introns.gtf" ]; then
                         echo_red "Error: Pre-final annotation GTF is missing. Ensure Steps 1-9 have been successfully completed before running Step 10."
                         exit 1
                     fi
-                    
+                fi
                     ;;
             *)
                 ;;
