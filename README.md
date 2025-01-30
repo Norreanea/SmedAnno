@@ -54,7 +54,7 @@ Ensure that you have added the required Conda channels (bioconda and conda-forge
 ## Usage
 
 ```bash
-Usage: SmedAnno [OPTIONS]
+Usage: smedanno.sh [OPTIONS]
      
      Mandatory Options for Specific Steps:
        --finalGTF PATH               Path to final GTF file (required for Functional Annotation only)
@@ -92,23 +92,23 @@ Usage: SmedAnno [OPTIONS]
        7 - Isoform Comparison and Annotation
        8 - GTF File Correction and Enhancement
        9 - Functional Annotation and Filtering
-	   10 - Integrate Functional Annotation (including Overlapped Genes and Transcripts, Reversed Duplicates, Fragmmented and Chimeric Genes Identification )
+      10 - Integrate Functional Annotation (including Overlapped Genes and Transcripts, Reversed Duplicates, Fragmmented and Chimeric Genes Identification )
      
      Examples:
        Run all steps:
-         SmedAnno --genomeRef genome.fa --dataDir ./data --outputDir ./output --threads 4 --all
+         smedanno.sh --genomeRef genome.fa --dataDir ./data --outputDir ./output --threads 4 --all
      
        Run Steps 1 and 2 only (rRNA Removal and Read Alignment):
-         SmedAnno --genomeRef genome.fa --dataDir ./data --outputDir ./output --threads 4 --steps 1,2
+         smedanno.sh --genomeRef genome.fa --dataDir ./data --outputDir ./output --threads 4 --steps 1,2
      
        Run Only Step 3 (Gene and Transcript Assembly) with BAM files:
-         SmedAnno --alignDir ./bam_files --outputDir ./output --threads 4 --steps 3
+         smedanno.sh --alignDir ./bam_files --outputDir ./output --threads 4 --steps 3
      
        Run Merging Assemblies Steps 4 and 5 with specific GTF directories:
-         SmedAnno --SR_RB_gtf_dir ./gtf/SR_RB --SR_DN_gtf_dir ./gtf/SR_DN --outputDir ./output --threads 4 --steps 4,5
+         smedanno.sh --SR_RB_gtf_dir ./gtf/SR_RB --SR_DN_gtf_dir ./gtf/SR_DN --outputDir ./output --threads 4 --steps 4,5
      
        Run Functional Annotation with specific methods:
-         SmedAnno --finalGTF final_annotation.gtf --outputDir ./output --threads 4 --steps 8 --functionalMethods BLASTp,PFAM --genomeRef genome.fa
+         smedanno.sh --finalGTF final_annotation.gtf --outputDir ./output --threads 4 --steps 8 --functionalMethods BLASTp,PFAM --genomeRef genome.fa
 ```
 
 ## Output
