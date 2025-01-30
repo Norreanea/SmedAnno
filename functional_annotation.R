@@ -907,9 +907,6 @@ functional_transcripts_updated <- functional_transcripts_updated %>%
     by = "gene_id"
   )
 
-
-# Continue with your existing R code, ensuring all file paths are constructed using `functional_dir` and `annotation_dir`.
-
 # ---------------------------
 # Save the Updated GTF
 # ---------------------------
