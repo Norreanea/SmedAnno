@@ -1,5 +1,5 @@
 
-![SmedAnno Logo]([https://github.com/Norreanea/SmedAnno/blob/main/SmedAnno_logo.png](https://github.com/Norreanea/SmedAnno/blob/main/SmedAnno_scheme.png))
+![SmedAnno Logo]([https://github.com/Norreanea/SmedAnno/blob/main/SmedAnno_scheme.png]))
 
 # SmedAnno
 
