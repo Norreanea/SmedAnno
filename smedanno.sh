@@ -12,8 +12,8 @@ set -o pipefail  # Pipeline returns the exit status of the last command to fail
 # ---------------------------
 # Create Linux-Native Temporary Directory for STAR
 # ---------------------------
-mkdir -p /tmp/temp_star
-chmod 777 /tmp/temp_star
+#mkdir -p /tmp/temp_star
+#chmod 777 /tmp/temp_star
 
 # ---------------------------
 # Define Color Variables for Echo Messages
@@ -44,6 +44,10 @@ echo_blue() {
 show_help() {
     echo "Usage: SmedAnno [OPTIONS]"
     echo ""
+	echo "General Mandatory Options (if applicable based on steps selected):"
+    echo "  --genomeRef PATH              Path to genome reference FASTA file"
+    echo "  --dataDir PATH                Path to input RNA-Seq data directory (must contain short_reads and/or mix_reads folders)"
+    echo ""
     echo "Mandatory Options for Specific Steps:"
     echo "  --finalGTF PATH               Path to final GTF file (optional, required for Functional Annotation only)"
     echo "  --alignDir PATH               Path to directory containing BAM files (optional, required for Gene and Transcript Assembly only)"
@@ -51,10 +55,6 @@ show_help() {
     echo "  --SR_DN_gtf_dir PATH          Directory containing SR_DN.gtf files (optional, required for Merging Assemblies)"
     echo "  --MR_RB_gtf_dir PATH          Directory containing MR_RB.gtf files (optional, required for Merging Assemblies)"
     echo "  --MR_DN_gtf_dir PATH          Directory containing MR_DN.gtf files (optional, required for Merging Assemblies)"
-    echo ""
-    echo "General Mandatory Options (if applicable based on steps selected):"
-    echo "  --genomeRef PATH              Path to genome reference FASTA file"
-    echo "  --dataDir PATH                Path to input RNA-Seq data directory (must contain short_reads and/or mix_reads folders)"
     echo ""
     echo "Optional Options:"
     echo "  --genomeDir PATH              Path to STAR genome directory (will be created if not provided)"
@@ -65,9 +65,14 @@ show_help() {
     echo "  --outputDir PATH              Path to output directory (default: ./outputDir)"
     echo "  --threads N                   Number of CPU threads to use (default: 8)"
     echo "  --minOrfLength N              Minimum ORF length for TransDecoder (default: 100)"
-    echo "  --steps LIST                  Comma-separated list of steps to run (1-8, include 5.1)"
+	echo "  --maxExonLength N             Maximum allowed exon length (default: 10000)"           
+    echo "  --maxTranscriptLength N       Maximum allowed transcript length (default: 100000)"      
+    echo "  --steps LIST                  Comma-separated list of steps to run (1-10)"
     echo "  --all                         Run all steps sequentially"
-    echo "  --functionalMethods METHODS    Comma-separated list of functional annotation methods to apply (BLASTp,BLASTx,PFAM; default: all)"
+    echo "  --functionalMethods METHODS   Comma-separated list of functional annotation methods to apply (BLASTp,BLASTx,PFAM; default: all)"
+	echo "  --conda VERSION               Set stringtie version for both short and mix reads (if not using individual overrides)"
+    echo "  --conda_short VERSION         Set stringtie version for short reads (default: 2.1.1)"
+    echo "  --conda_mix VERSION           Set stringtie version for mixed reads (default: 2.2.1)"
     echo "  --help                        Display this help message and exit"
     echo ""
     echo "Steps:"
@@ -84,19 +89,22 @@ show_help() {
     echo ""
     echo "Examples:"
     echo "  Run all steps:"
-    echo "    SmedAnno --genomeRef genome.fa --dataDir ./data --outputDir ./output --threads 4 --all"
+    echo "    ./smedanno.sh --genomeRef genome.fa --dataDir ./data --outputDir ./output --threads 4 --all"
+    echo ""
+	echo "  Run all steps with custom stringtie version 3.0.0 for both environments:"
+    echo "    ./smedanno.sh --genomeRef genome.fa --dataDir ./data --outputDir ./output --threads 4 --all --conda 3.0.0"
     echo ""
     echo "  Run Steps 1 and 2 only (rRNA Removal and Read Alignment):"
-    echo "    SmedAnno --genomeRef genome.fa --dataDir ./data --outputDir ./output --threads 4 --steps 1,2"
+    echo "    ./smedanno.sh --genomeRef genome.fa --dataDir ./data --outputDir ./output --threads 4 --steps 1,2"
     echo ""
     echo "  Run Only Step 3 (Gene and Transcript Assembly) with BAM files:"
-    echo "    SmedAnno --alignDir ./bam_files --outputDir ./output --threads 4 --steps 3"
+    echo "    ./smedanno.sh --alignDir ./bam_files --outputDir ./output --threads 4 --steps 3"
     echo ""
     echo "  Run Merging Assemblies Steps 4 and 5 with specific GTF directories:"
-    echo "    SmedAnno --SR_RB_gtf_dir ./gtf/SR_RB --SR_DN_gtf_dir ./gtf/SR_DN --outputDir ./output --threads 4 --steps 4,5"
+    echo "    ./smedanno.sh --SR_RB_gtf_dir ./gtf/SR_RB --SR_DN_gtf_dir ./gtf/SR_DN --outputDir ./output --threads 4 --steps 4,5"
     echo ""
     echo "  Run Functional Annotation with specific methods:"
-    echo "    SmedAnno --finalGTF final_annotation.gtf --outputDir ./output --threads 4 --steps 8 --functionalMethods BLASTp,PFAM --genomeRef genome.fa"
+    echo "    ./smedanno.sh --finalGTF corrected_with_introns.gtf --outputDir ./output --threads 4 --steps 8 --functionalMethods BLASTp,PFAM --genomeRef genome.fa"
     exit 1
 }
 
@@ -130,6 +138,39 @@ find_read_file() {
     done
     echo ""
 }
+# ---------------------------
+# Define a helper function to check if a step is requested
+# ---------------------------
+
+contains_step() {
+    local target="$1"
+    shift
+    for elem in "$@"; do
+        if [ "$elem" = "$target" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# ---------------------------
+# Global Default Versions for Conda Environments
+# ---------------------------
+DEFAULT_CONDA_SHORT="2.1.1"
+DEFAULT_CONDA_MIX="2.2.1"
+CONDA_SHORT_VERSION="${DEFAULT_CONDA_SHORT}"
+CONDA_MIX_VERSION="${DEFAULT_CONDA_MIX}"
+CONDA_VERSION=""
+ENV_APPS="bioapps_env"
+
+
+# ---------------------------
+# Default maximum lengths (can be overridden by user)
+# ---------------------------
+DEFAULT_MAX_EXON_LENGTH=10000
+DEFAULT_MAX_TRANSCRIPT_LENGTH=100000
+MAX_EXON_LENGTH="${DEFAULT_MAX_EXON_LENGTH}"
+MAX_TRANSCRIPT_LENGTH="${DEFAULT_MAX_TRANSCRIPT_LENGTH}"
 
 # ---------------------------
 # Function to Check Global Dependencies
@@ -148,35 +189,59 @@ check_dependencies() {
 # Function to Create Conda Environments and Install Tools
 # ---------------------------
 setup_conda_environments() {
-    echo_green  "Setting up conda environments"
+    echo_green "Setting up conda environments"
+    source "$(conda info --base)/etc/profile.d/conda.sh" || { echo_red "Error: Failed to source conda.sh"; exit 1; }
+	conda config --set channel_priority flexible
+	
+	# Create the logs directory if it doesn't exist
+    mkdir -p "${OUTPUT_DIR}/logs"
 
-    # Initialize Conda
-    # shellcheck source=/dev/null
-    source "$(conda info --base)/etc/profile.d/conda.sh" || { echo_red  "Error: Failed to source conda.sh"; exit 1; }
-
-    # Create conda environment for StringTie v2.1.1
-    if ! conda env list | grep -q 'stringtie211'; then
-        echo_green  "Creating conda environment: stringtie211"
-        if ! conda create -y -n stringtie211 stringtie=2.1.1 &> "${OUTPUT_DIR}/logs/conda_create_stringtie211.log"; then
-            echo_red  "Error: Failed to create stringtie211 environment. Check ${OUTPUT_DIR}/logs/conda_create_stringtie211.log for details."
+    if ! conda env list | grep -q "${ENV_SHORT}"; then
+        echo_green "Creating conda environment: ${ENV_SHORT} with stringtie version ${CONDA_SHORT_VERSION}"
+        if ! conda create -y -n "${ENV_SHORT}" stringtie=${CONDA_SHORT_VERSION} &> "${OUTPUT_DIR}/logs/conda_create_${ENV_SHORT}.log"; then
+            echo_red "Error: Failed to create ${ENV_SHORT} environment. Check ${OUTPUT_DIR}/logs/conda_create_${ENV_SHORT}.log for details."
             exit 1
         fi
     else
-        echo_green  "Conda environment 'stringtie211' already exists."
+        echo_green "Conda environment '${ENV_SHORT}' already exists."
     fi
 
-    # Create conda environment for StringTie v2.2.1 and other tools
-    if ! conda env list | grep -q 'stringtie221'; then
-        echo_green  "Creating conda environment: stringtie221"
-        if ! conda create -y -n stringtie221 stringtie=2.2.1 gffcompare agat TransDecoder blast hmmer pfam_scan gffread samtools star minimap2 &> "${OUTPUT_DIR}/logs/conda_create_stringtie221.log"; then
-            echo_red  "Error: Failed to create stringtie221 environment. Check ${OUTPUT_DIR}/logs/conda_create_stringtie221.log for details."
+    if ! conda env list | grep -q "${ENV_MIX}"; then
+        echo_green "Creating conda environment: ${ENV_MIX} with stringtie version ${CONDA_MIX_VERSION} and additional tools"
+        if ! conda create -y -n "${ENV_MIX}" stringtie=${CONDA_MIX_VERSION} &> "${OUTPUT_DIR}/logs/conda_create_${ENV_MIX}.log"; then
+            echo_red "Error: Failed to create ${ENV_MIX} environment. Check ${OUTPUT_DIR}/logs/conda_create_${ENV_MIX}.log for details."
             exit 1
         fi
     else
-        echo_green  "Conda environment 'stringtie221' already exists."
+        echo_green "Conda environment '${ENV_MIX}' already exists."
     fi
+	
+	if ! conda env list | grep -q "${ENV_APPS}"; then
+		echo_green "Creating conda environment: ${ENV_APPS} with gffcompare, agat, TransDecoder, blast, hmmer, pfam_scan, gffread, samtools, star, and minimap2"
+		if ! conda create -y -n "${ENV_APPS}" gffcompare agat TransDecoder blast hmmer pfam_scan gffread samtools star minimap2 &> "${OUTPUT_DIR}/logs/conda_create_${ENV_APPS}.log"; then
+			echo_red "Error: Failed to create ${ENV_APPS} environment. Check ${OUTPUT_DIR}/logs/conda_create_${ENV_APPS}.log for details."
+			exit 1
+		fi
+	else
+    echo_green "Conda environment '${ENV_APPS}' already exists."
+fi
 
-    echo_green  "Conda environments set up successfully."
+
+    echo_green "Conda environments set up successfully."
+}
+
+# ---------------------------
+# Helper Function: contains
+# Checks if a value exists in a list
+# ---------------------------
+contains() {
+    local e
+    for e in "$@"; do
+        if [[ "$e" == "$1" ]]; then
+            return 0
+        fi
+    done
+    return 1
 }
 
 # ---------------------------
@@ -184,7 +249,7 @@ setup_conda_environments() {
 # ---------------------------
 step1_rrna_removal() {
     echo_blue  "Starting Step 1: rRNA Removal"
-    conda activate stringtie221
+    conda activate ${ENV_APPS}
 
     if [ -z "${RRNA_REF}" ]; then
         echo_green  "No rRNA reference provided. Skipping rRNA removal."
@@ -208,6 +273,10 @@ step1_rrna_removal() {
     if [ ! -d "${RRNA_REF_INDEX}" ] || [ ! -f "${RRNA_REF_INDEX}/SA" ]; then
         echo_green  "Building STAR index for rRNA reference at ${RRNA_REF_INDEX}"
         mkdir -p "${RRNA_REF_INDEX}"
+		TMP_DIR="${OUTPUT_DIR}/tmp_star"
+		rm -rf "${TMP_DIR}"
+		mkdir -p "${TMP_DIR}"
+		chmod 777 "${TMP_DIR}"
         STAR --runThreadN "${THREADS}" \
              --runMode genomeGenerate \
              --genomeDir "${RRNA_REF_INDEX}" \
@@ -250,6 +319,11 @@ step1_rrna_removal() {
 
             # Remove rRNA using STAR
             echo_green  "Removing rRNA from short reads using STAR for Sample: ${SAMPLE}"
+			TMP_DIR="${OUTPUT_DIR}/tmp_star"
+		    rm -rf "${TMP_DIR}"
+		    mkdir -p "${TMP_DIR}"
+		    chmod 777 "${TMP_DIR}"
+			
             STAR --runThreadN "${THREADS}" \
                  --genomeDir "${RRNA_REF_INDEX}" \
                  --readFilesIn "${READ1}" "${READ2}" \
@@ -300,6 +374,10 @@ step1_rrna_removal() {
 
             # Align short reads using STAR (sorted BAM)
             echo_green  "Running STAR aligner for Mixed Sample: ${SAMPLE} (Short Reads)"
+			TMP_DIR="${OUTPUT_DIR}/tmp_star"
+			rm -rf "${TMP_DIR}"
+			mkdir -p "${TMP_DIR}"
+			chmod 777 "${TMP_DIR}"
             STAR --runThreadN "${THREADS}" \
                  --genomeDir "${RRNA_REF_INDEX}" \
                  --readFilesIn "${MIX_READ1}" "${MIX_READ2}" \
@@ -391,7 +469,12 @@ step1_rrna_removal() {
     # ---------------------------
     step2_read_alignment() {
         echo_blue  "Starting Step 2: Read Alignment to the Reference Genome"
-        conda activate stringtie221
+        conda activate ${ENV_APPS}
+		
+		if [ -z "${GENOME_DIR}" ]; then
+			GENOME_DIR="${OUTPUT_DIR}/genome"
+			echo_green "Step 2 requires a genome index. GENOME_DIR not provided; auto-setting GENOME_DIR to ${GENOME_DIR}"
+		fi
 
         # Integrate Genome Index Generation within Step 2
         if [ ! -d "${GENOME_DIR}" ] || [ ! -f "${GENOME_DIR}/SA" ]; then
@@ -406,6 +489,10 @@ step1_rrna_removal() {
             echo_green  "Calculated genomeSAindexNbases: ${SA_INDEX_NBASES}"
 
             echo_green  "Generating genome index with STAR at ${GENOME_DIR}"
+			TMP_DIR="${OUTPUT_DIR}/tmp_star"
+		    rm -rf "${TMP_DIR}"
+		    mkdir -p "${TMP_DIR}"
+		    chmod 777 "${TMP_DIR}"
             mkdir -p "${GENOME_DIR}"
             STAR --runThreadN "${THREADS}" \
                  --runMode genomeGenerate \
@@ -452,6 +539,10 @@ step1_rrna_removal() {
 
                 # Align reads using STAR (sorted BAM)
                 echo_green  "Running STAR aligner for Short-Only Sample: ${SAMPLE}"
+				TMP_DIR="${OUTPUT_DIR}/tmp_star"
+		        rm -rf "${TMP_DIR}"
+		        mkdir -p "${TMP_DIR}"
+		        chmod 777 "${TMP_DIR}"
                 STAR --runThreadN "${THREADS}" \
                      --genomeDir "${GENOME_DIR}" \
                      --readFilesIn "${READ1}" "${READ2}" \
@@ -516,6 +607,10 @@ step1_rrna_removal() {
 
                 # Align short reads using STAR (sorted BAM)
                 echo_green  "Running STAR aligner for Mixed Sample: ${SAMPLE} (Short Reads)"
+				TMP_DIR="${OUTPUT_DIR}/tmp_star"
+		        rm -rf "${TMP_DIR}"
+		        mkdir -p "${TMP_DIR}"
+		        chmod 777 "${TMP_DIR}"
                 STAR --runThreadN "${THREADS}" \
                      --genomeDir "${GENOME_DIR}" \
                      --readFilesIn "${MIX_READ1}" "${MIX_READ2}" \
@@ -602,10 +697,10 @@ step1_rrna_removal() {
 
                 ALIGNED_SORTED_BAM="${ALIGN_DIR}/${SAMPLE}_STAR_Aligned.sortedByCoord.outXS.bam"
 
-                # Reference-Based Annotation (RB) with StringTie2 v2.1.1 (short reads)
+                # Reference-Based Annotation (RB) with StringTie2 (short reads)
                 if [ -n "${GENOME_GTF}" ]; then
-                    echo_green  "Running StringTie2 v2.1.1 for Reference-Based Assembly (RB, SR)"
-                    conda activate stringtie211
+                    echo_green  "Running StringTie2  for Reference-Based Assembly (RB, SR)"
+                    conda activate ${ENV_SHORT}
                     stringtie -p "${THREADS}" \
                               -G "${GENOME_GTF}" \
                               -c 1.5 \
@@ -615,9 +710,9 @@ step1_rrna_removal() {
                     conda deactivate
                 fi
 
-                # De Novo Annotation (DN) with StringTie2 v2.1.1 (short reads)
-                echo_green  "Running StringTie2 v2.1.1 for De Novo Assembly (DN, SR)"
-                conda activate stringtie211
+                # De Novo Annotation (DN) with StringTie2 (short reads)
+                echo_green  "Running StringTie2 for De Novo Assembly (DN, SR)"
+                conda activate ${ENV_SHORT}
                 stringtie -p "${THREADS}" \
                           -c 1.5 \
                           -f 0.02 \
@@ -651,10 +746,10 @@ step1_rrna_removal() {
                     continue
                 fi
 
-                # Reference-Based Annotation (RB) with StringTie2 v2.2.1 (Mixed Reads)
+                # Reference-Based Annotation (RB) with StringTie2 (Mixed Reads)
                 if [ -n "${GENOME_GTF}" ]; then
-                    echo_green  "Running StringTie2 v2.2.1 for Reference-Based Assembly (RB, MR)"
-                    conda activate stringtie221
+                    echo_green  "Running StringTie2 for Reference-Based Assembly (RB, MR)"
+                    conda activate ${ENV_MIX}
                     stringtie --mix -p "${THREADS}" \
                               -G "${GENOME_GTF}" \
                               -c 1.5 \
@@ -664,9 +759,9 @@ step1_rrna_removal() {
                     conda deactivate
                 fi
 
-                # De Novo Annotation (DN) with StringTie2 v2.2.1 (Mixed Reads)
-                echo_green  "Running StringTie2 v2.2.1 for De Novo Assembly (DN, MR)"
-                conda activate stringtie221
+                # De Novo Annotation (DN) with StringTie2 (Mixed Reads)
+                echo_green  "Running StringTie2 for De Novo Assembly (DN, MR)"
+                conda activate ${ENV_MIX}
                 stringtie --mix -p "${THREADS}" \
                           -c 1.5 \
                           -f 0.02 \
@@ -692,8 +787,8 @@ step1_rrna_removal() {
             return
         fi
 
-        # Activate StringTie 2.2.1 environment
-        conda activate stringtie221
+        # Activate StringTie environment
+        conda activate ${ENV_MIX}
 
         # Merge Reference-Based Assemblies for Short Reads (SR)
         if [ -d "${SR_RB_GTF_DIR}" ]; then
@@ -761,7 +856,7 @@ step1_rrna_removal() {
     step5_merging_transcripts_II() {
         echo_blue "Starting Step 5: Merge De Novo Assemblies and Create Pre-Final Annotation"
 
-        conda activate stringtie221
+        conda activate ${ENV_MIX}
 
         # Merge De Novo Assemblies for Short Reads (SR)
         if [ -d "${SR_DN_GTF_DIR}" ]; then
@@ -864,16 +959,16 @@ step1_rrna_removal() {
     # ---------------------------
     step6_filter_transcripts() {
         echo_green "Starting Step 6: Filtering Transcripts with Excessively Long Exons or Genomic Spans"
-        conda activate stringtie221
+        conda activate ${ENV_APPS}
         # Define the maximum exon and transcript lengths
-        MAX_EXON_LENGTH=10000
-        MAX_TRANSCRIPT_LENGTH=100000
+        #MAX_EXON_LENGTH=10000
+        #MAX_TRANSCRIPT_LENGTH=100000
 
         # Input pre-final GTF
         PREFINAL_GTF="${MERGE_DIR}/prefinal_annotation.gtf"
 
         # Output filtered GTF
-        FILTERED_GTF="${MERGE_DIR}/prefinal_annotation_filtered.gtf"
+        FILTERED_GTF="${MERGE_DIR}/filtered_annotation.gtf"
 
         # Temporary files
         BAD_TRANSCRIPTS_EXON="${MERGE_DIR}/transcripts_with_long_exons.txt"
@@ -962,6 +1057,7 @@ step1_rrna_removal() {
             echo_red "Error: Failed to create filtered GTF file."
             exit 1
         fi
+		conda deactivate
 
         echo_green "Step 6 Completed: Filtering Transcripts with Excessively Long Exons or Genomic Spans"
     }
@@ -973,8 +1069,8 @@ step1_rrna_removal() {
         echo_blue  "Starting Step 7: Isoform Comparison and Annotation"
 
         # Determine which GTF to use
-        if [ -f "${MERGE_DIR}/prefinal_annotation_filtered.gtf" ]; then
-            ANNOTATED_GTF="${MERGE_DIR}/prefinal_annotation_filtered.gtf"
+        if [ -f "${MERGE_DIR}/filtered_annotation.gtf" ]; then
+            ANNOTATED_GTF="${MERGE_DIR}/filtered_annotation.gtf"
         elif [ -n "${finalGTF}" ] && [ -f "${finalGTF}" ]; then
             ANNOTATED_GTF="${finalGTF}"
         else
@@ -982,7 +1078,7 @@ step1_rrna_removal() {
             return
         fi
 
-        conda activate stringtie221
+        conda activate ${ENV_APPS}
 
         COMP_OUTPUT_PREFIX="${ANNOTATION_DIR}/gffcomp"
 
@@ -1013,13 +1109,13 @@ step1_rrna_removal() {
     step8_gtf_correction() {
         echo_blue  "Starting Step 8: GTF Correction and Enhancement"
 
-        conda activate stringtie221
+        conda activate ${ENV_APPS}
 
         # Determine which GTF to use for correction
         if [ -f "${ANNOTATION_DIR}/gffcomp.annotated.gtf" ]; then
             ANNOTATED_GTF="${ANNOTATION_DIR}/gffcomp.annotated.gtf"
-        elif [ -f "${MERGE_DIR}/prefinal_annotation_filtered.gtf" ]; then
-            ANNOTATED_GTF="${MERGE_DIR}/prefinal_annotation_filtered.gtf"
+        elif [ -f "${MERGE_DIR}/filtered_annotation.gtf" ]; then
+            ANNOTATED_GTF="${MERGE_DIR}/filtered_annotation.gtf"
         elif [ -n "${finalGTF}" ] && [ -f "${finalGTF}" ]; then
             ANNOTATED_GTF="${finalGTF}"
         else
@@ -1036,6 +1132,14 @@ step1_rrna_removal() {
 
         echo_green  "Adding intron features to GTF file using AGAT"
         agat_sp_add_introns.pl -g "${CORRECTED_GTF}" -o "${CORRECTED_INTRONS_GTF}"
+		
+		# Move all AGAT log files (*.agat.txt) from the current directory to the logs directory in the output folder
+		if compgen -G "./*.agat.txt" > /dev/null; then
+			echo_green "Moving AGAT log files to ${OUTPUT_DIR}/logs/"
+			mv ./*.agat.txt "${OUTPUT_DIR}/logs/"
+		else
+			echo_green "No AGAT log files (*.agat.txt) found in the current directory."
+		fi
 
         conda deactivate
 
@@ -1057,7 +1161,7 @@ step1_rrna_removal() {
             return
         fi
 
-        conda activate stringtie221
+        conda activate ${ENV_APPS}
 
         # Paths to transcript and protein files
         TRANSCRIPTS_FA="${ANNOTATION_DIR}/transcripts.fa"
@@ -1070,6 +1174,8 @@ step1_rrna_removal() {
         # ORF Prediction with TransDecoder
         echo_green  "Running TransDecoder to predict ORFs"
         TransDecoder.LongOrfs -t "${TRANSCRIPTS_FA}" -m "${MIN_ORF_LENGTH}" -O "${FUNCTIONAL_DIR}/TransDecoder"
+		# Note: Use --min_prot_len instead of -m, and remove the -O option.
+        #TransDecoder.LongOrfs -t "${TRANSCRIPTS_FA}" --min_prot_len "${MIN_ORF_LENGTH}"
 
         # Predict likely coding regions
         echo_green  "Running TransDecoder.Predict to identify likely coding regions"
@@ -1089,14 +1195,7 @@ step1_rrna_removal() {
             makeblastdb -in "${FUNCTIONAL_DIR}/blast_dbs/swissprot.fasta" -dbtype prot -out "${BLAST_DB_SwissProt}"
         fi
 
-        if [ -z "${PFAM_DB}" ]; then
-            echo_green  "Downloading PFAM database"
-            mkdir -p "${FUNCTIONAL_DIR}/pfam_db"
-            PFAM_DB="${FUNCTIONAL_DIR}/pfam_db"
-            wget -P "${PFAM_DB}" ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.hmm.gz
-            gunzip "${PFAM_DB}/Pfam-A.hmm.gz"
-            hmmpress "${PFAM_DB}/Pfam-A.hmm"
-        fi
+        
 
         # Homology Search with BLASTp and BLASTx
         if [[ "${FUNCTIONAL_METHODS}" == *"BLASTp"* ]]; then
@@ -1122,6 +1221,14 @@ step1_rrna_removal() {
         fi
 
         if [[ "${FUNCTIONAL_METHODS}" == *"PFAM"* ]]; then
+		    if [ -z "${PFAM_DB}" ]; then
+				echo_green  "Downloading PFAM database"
+				mkdir -p "${FUNCTIONAL_DIR}/pfam_db"
+				PFAM_DB="${FUNCTIONAL_DIR}/pfam_db"
+				wget -P "${PFAM_DB}" ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.hmm.gz
+				gunzip "${PFAM_DB}/Pfam-A.hmm.gz"
+				hmmpress "${PFAM_DB}/Pfam-A.hmm"
+			fi
             echo_green  "Running PFAM Scan to identify protein domains"
             hmmscan --cpu "${THREADS}" --domtblout "${FUNCTIONAL_DIR}/pfam_results.out" "${PFAM_DB}/Pfam-A.hmm" "${LONGEST_ORFS_PEP}" 
         else
@@ -1160,10 +1267,10 @@ step1_rrna_removal() {
         comm -12 <(sort "${FUNCTIONAL_DIR}/transcripts_with_orfs.txt") <(sort "${FUNCTIONAL_DIR}/functional_transcripts_sorted.txt") > "${FUNCTIONAL_DIR}/final_filtered_transcripts.txt"
 
         # Generate final annotation GTF
-        echo_green  "Generating final filtered GTF file"
-        grep -F -f "${FUNCTIONAL_DIR}/final_filtered_transcripts.txt" "${ANNOTATED_GTF}" > "${FUNCTIONAL_DIR}/final_annotation.gtf"
+        #echo_green  "Generating final filtered GTF file"
+        #grep -F -f "${FUNCTIONAL_DIR}/final_filtered_transcripts.txt" "${ANNOTATED_GTF}" > "${FUNCTIONAL_DIR}/annotation_part_I.gtf"
 
-        echo_green  "Final filtered GTF file created at ${FUNCTIONAL_DIR}/final_annotation.gtf"
+        #echo_green  "Final filtered GTF file created at ${FUNCTIONAL_DIR}/annotation_part_I.gtf"
 
         echo_blue  "Step 9 Completed: Functional Annotation and Filtering"
     }
@@ -1175,7 +1282,7 @@ step1_rrna_removal() {
 		echo_blue "Starting Step 10: Integrate Functional Annotation (R Script)"
 		
 		# Define paths
-		FUNCTIONAL_SCRIPT="../scripts/functional_annotation.R"  
+		FUNCTIONAL_SCRIPT="functional_annotation.R"  
 		ANNOTATION_DIR="${OUTPUT_DIR}/annotation"
 		FUNCTIONAL_DIR="${OUTPUT_DIR}/functional_annotation"
 		GENOME_GTF="${GENOME_GTF}"  # Already defined earlier
@@ -1189,13 +1296,13 @@ step1_rrna_removal() {
 
 		# Run the R script with required arguments
 		if [ -n "$GENOME_GTF" ]; then
-		  Rscript ../scripts/functional_annotation.R --annotation_dir "$ANNOTATION_DIR" \
+		  Rscript functional_annotation.R --annotation_dir "$ANNOTATION_DIR" \
 									   --functional_dir "$FUNCTIONAL_DIR" \
 									   --genome_gtf "$GENOME_GTF" \
 									   --output_dir "$OUTPUT_DIR" \
 									   >> "$LOGS_DIR/functional_annotation.log" 2>&1
 		else
-		  Rscript ../scripts/functional_annotation.R --annotation_dir "$ANNOTATION_DIR" \
+		  Rscript functional_annotation.R --annotation_dir "$ANNOTATION_DIR" \
 									   --functional_dir "$FUNCTIONAL_DIR" \
 									   --output_dir "$OUTPUT_DIR" \
 									   >> "$LOGS_DIR/functional_annotation.log" 2>&1
@@ -1206,6 +1313,7 @@ step1_rrna_removal() {
 			exit 1
 		else
 			echo_green "Functional annotation completed successfully."
+			echo_green  "Final filtered GTF file created at ${FUNCTIONAL_DIR}/annotation_part_I.gtf"
 		fi
 
 		echo_blue "Step 10 Completed: Integrate Functional Annotation (R Script)"
@@ -1220,7 +1328,7 @@ step1_rrna_removal() {
     # Parse Command-Line Arguments with getopt
     # ---------------------------
     # Initialize variables with default values
-    #GENOME_DIR="./outputDir/genome"
+    GENOME_DIR="./outputDir/genome"
     RRNA_REF=""
     RRNA_REF_INDEX=""
     GENOME_REF=""
@@ -1242,39 +1350,79 @@ step1_rrna_removal() {
     FUNCTIONAL_METHODS="BLASTp,BLASTx,PFAM"  # Default: all methods
 
     # Use getopt for parsing long options
-    if ! PARSED_OPTIONS=$(getopt -n "$0" -o "" --long genomeDir:,rrnaRef:,genomeRef:,genomeGTF:,ALIGN_DIR:,finalGTF:,SR_RB_gtf_dir:,SR_DN_gtf_dir:,MR_RB_gtf_dir:,MR_DN_gtf_dir:,blastDB_SwissProt:,pfamDB:,dataDir:,outputDir:,threads:,steps:,all,help,minOrfLength:,functionalMethods: -- "$@"); then
-        show_help
-    fi
+    if ! PARSED_OPTIONS=$(getopt -n "$0" -o "" --long genomeDir:,rrnaRef:,genomeRef:,genomeGTF:,ALIGN_DIR:,finalGTF:,SR_RB_gtf_dir:,SR_DN_gtf_dir:,MR_RB_gtf_dir:,MR_DN_gtf_dir:,blastDB_SwissProt:,pfamDB:,dataDir:,outputDir:,threads:,minOrfLength:,maxExonLength:,maxTranscriptLength:,steps:,all,help,functionalMethods:,conda:,conda_short:,conda_mix: -- "$@"); then
+		show_help
+	fi
+	eval set -- "$PARSED_OPTIONS"
 
-    eval set -- "$PARSED_OPTIONS"
+	while [[ "$#" -gt 0 ]]; do
+		case $1 in
+			--genomeDir) GENOME_DIR="$2"; shift 2 ;;
+			--rrnaRef) RRNA_REF="$2"; shift 2 ;;
+			--genomeRef) GENOME_REF="$2"; shift 2 ;;
+			--genomeGTF) GENOME_GTF="$2"; shift 2 ;;
+			--ALIGN_DIR) ALIGN_DIR="$2"; shift 2 ;;
+			--finalGTF) finalGTF="$2"; shift 2 ;;
+			--SR_RB_gtf_dir) SR_RB_GTF_DIR="$2"; shift 2 ;;
+			--SR_DN_gtf_dir) SR_DN_GTF_DIR="$2"; shift 2 ;;
+			--MR_RB_gtf_dir) MR_RB_GTF_DIR="$2"; shift 2 ;;
+			--MR_DN_gtf_dir) MR_DN_GTF_DIR="$2"; shift 2 ;;
+			--blastDB_SwissProt) BLAST_DB_SwissProt="$2"; shift 2 ;;
+			--pfamDB) PFAM_DB="$2"; shift 2 ;;
+			--dataDir) DATA_DIR="$2"; shift 2 ;;
+			--outputDir) OUTPUT_DIR="$2"; shift 2 ;;
+			--threads) THREADS="$2"; shift 2 ;;
+			--minOrfLength) MIN_ORF_LENGTH="$2"; shift 2 ;;
+			--maxExonLength) MAX_EXON_LENGTH="$2"; shift 2 ;;
+			--maxTranscriptLength) MAX_TRANSCRIPT_LENGTH="$2"; shift 2 ;;
+			--steps) IFS=',' read -ra STEPS <<< "$2"; shift 2 ;;
+			--all) RUN_ALL=true; shift ;;
+			--functionalMethods) FUNCTIONAL_METHODS="$2"; shift 2 ;;
+			--conda) CONDA_VERSION="$2"; shift 2 ;;
+			--conda_short) CONDA_SHORT_VERSION="$2"; shift 2 ;;
+			--conda_mix) CONDA_MIX_VERSION="$2"; shift 2 ;;
+			-h|--help) show_help ;;
+			--) shift; break ;;
+			*) echo "Unknown parameter passed: $1"; show_help ;;
+		esac
+	done
+	
+	# If step 2 is requested
+	if contains_step "2" "${STEPS_TO_RUN[@]}"; then
+		if [ -z "${GENOME_DIR}" ]; then
+			GENOME_DIR="${OUTPUT_DIR}/genome"
+			echo_green "Step 2 requires a genome index. GENOME_DIR not provided; auto-setting GENOME_DIR to ${GENOME_DIR}"
+		fi
+	fi
 
-    # Parse the options
-    while [[ "$#" -gt 0 ]]; do
-        case $1 in
-            --genomeDir) GENOME_DIR="$2"; shift 2 ;;
-            --rrnaRef) RRNA_REF="$2"; shift 2 ;;
-            --genomeRef) GENOME_REF="$2"; shift 2 ;;
-            --genomeGTF) GENOME_GTF="$2"; shift 2 ;;
-            --alignDir) ALIGN_DIR="$2"; shift 2 ;;
-            --finalGTF) finalGTF="$2"; shift 2 ;;
-            --SR_RB_gtf_dir) SR_RB_GTF_DIR="$2"; shift 2 ;;
-            --SR_DN_gtf_dir) SR_DN_GTF_DIR="$2"; shift 2 ;;
-            --MR_RB_gtf_dir) MR_RB_GTF_DIR="$2"; shift 2 ;;
-            --MR_DN_gtf_dir) MR_DN_GTF_DIR="$2"; shift 2 ;;
-            --blastDB_SwissProt) BLAST_DB_SwissProt="$2"; shift 2 ;;
-            --pfamDB) PFAM_DB="$2"; shift 2 ;;
-            --dataDir) DATA_DIR="$2"; shift 2 ;;
-            --outputDir) OUTPUT_DIR="$2"; shift 2 ;;
-            --threads) THREADS="$2"; shift 2 ;;
-            --minOrfLength) MIN_ORF_LENGTH="$2"; shift 2 ;;
-            --steps) IFS=',' read -ra STEPS <<< "$2"; shift 2 ;;
-            --all) RUN_ALL=true; shift ;;
-            --functionalMethods) FUNCTIONAL_METHODS="$2"; shift 2 ;;
-            -h|--help) show_help ;;
-            --) shift; break ;;
-            *) echo "Unknown parameter passed: $1"; show_help ;;
-        esac
-    done
+	# If --conda was provided and the specific versions are still at their defaults, override them
+	if [ -n "$CONDA_VERSION" ]; then
+		if [ "$CONDA_SHORT_VERSION" = "$DEFAULT_CONDA_SHORT" ]; then
+			CONDA_SHORT_VERSION="$CONDA_VERSION"
+		fi
+		if [ "$CONDA_MIX_VERSION" = "$DEFAULT_CONDA_MIX" ]; then
+			CONDA_MIX_VERSION="$CONDA_VERSION"
+		fi
+	fi
+	
+	if [ "$CONDA_SHORT_VERSION" = "$CONDA_MIX_VERSION" ]; then
+		ENV_COMMON="stringtie_${CONDA_SHORT_VERSION//./}"
+		ENV_SHORT="${ENV_COMMON}"
+		ENV_MIX="${ENV_COMMON}"
+	else
+		ENV_SHORT="stringtie_short_${CONDA_SHORT_VERSION//./}"
+		ENV_MIX="stringtie_mix_${CONDA_MIX_VERSION//./}"
+	fi
+	
+	# Validate that MAX_EXON_LENGTH and MAX_TRANSCRIPT_LENGTH are positive integers
+	if ! [[ "$MAX_EXON_LENGTH" =~ ^[1-9][0-9]*$ ]]; then
+		echo_red "Error: --maxExonLength must be a positive integer."
+		exit 1
+	fi
+	if ! [[ "$MAX_TRANSCRIPT_LENGTH" =~ ^[1-9][0-9]*$ ]]; then
+		echo_red "Error: --maxTranscriptLength must be a positive integer."
+		exit 1
+	fi
 
     # ---------------------------
     # Validate Mandatory Arguments Based on Selected Steps
@@ -1310,10 +1458,55 @@ step1_rrna_removal() {
 		MR_RB_GTF_DIR="${ASSEMBLY_DIR}/MR_RB"
 		MR_DN_GTF_DIR="${ASSEMBLY_DIR}/MR_DN"
 		
-		mkdir -p "${PREPROC_DIR}" "${ALIGN_DIR}" "${ASSEMBLY_DIR}" "${MERGE_DIR}" "${ANNOTATION_DIR}" "${FUNCTIONAL_DIR}" "${LOGS_DIR}" "${SR_RB_GTF_DIR}" "${SR_DN_GTF_DIR}" "${MR_RB_GTF_DIR}" "${MR_DN_GTF_DIR}"
+		#mkdir -p "${PREPROC_DIR}" "${ALIGN_DIR}" "${ASSEMBLY_DIR}" "${MERGE_DIR}" "${ANNOTATION_DIR}" "${FUNCTIONAL_DIR}" "${LOGS_DIR}" "${SR_RB_GTF_DIR}" "${SR_DN_GTF_DIR}" "${MR_RB_GTF_DIR}" "${MR_DN_GTF_DIR}"
 	fi
 
-    
+    # ---------------------------
+	# Set up default output directories if not provided
+	# ---------------------------
+	if [ -z "${OUTPUT_DIR}" ]; then
+		OUTPUT_DIR="./outputDir"
+	fi
+	if [ -z "${GENOME_DIR}" ]; then
+		GENOME_DIR="${OUTPUT_DIR}/genome"
+	fi
+	if [ -z "${PREPROC_DIR}" ]; then
+		PREPROC_DIR="${OUTPUT_DIR}/preprocessing"
+	fi
+	if [ -z "${ALIGN_DIR}" ]; then
+		ALIGN_DIR="${OUTPUT_DIR}/alignment"
+	fi
+	if [ -z "${ASSEMBLY_DIR}" ]; then
+		ASSEMBLY_DIR="${OUTPUT_DIR}/assembly"
+	fi
+	if [ -z "${MERGE_DIR}" ]; then
+		MERGE_DIR="${OUTPUT_DIR}/merging"
+	fi
+	if [ -z "${ANNOTATION_DIR}" ]; then
+		ANNOTATION_DIR="${OUTPUT_DIR}/annotation"
+	fi
+	if [ -z "${FUNCTIONAL_DIR}" ]; then
+		FUNCTIONAL_DIR="${OUTPUT_DIR}/functional_annotation"
+	fi
+	if [ -z "${LOGS_DIR}" ]; then
+		LOGS_DIR="${OUTPUT_DIR}/logs"
+	fi
+	if [ -z "${SR_RB_GTF_DIR}" ]; then
+		SR_RB_GTF_DIR="${ASSEMBLY_DIR}/SR_RB"
+	fi
+	if [ -z "${SR_DN_GTF_DIR}" ]; then
+		SR_DN_GTF_DIR="${ASSEMBLY_DIR}/SR_DN"
+	fi
+	if [ -z "${MR_RB_GTF_DIR}" ]; then
+		MR_RB_GTF_DIR="${ASSEMBLY_DIR}/MR_RB"
+	fi
+	if [ -z "${MR_DN_GTF_DIR}" ]; then
+		MR_DN_GTF_DIR="${ASSEMBLY_DIR}/MR_DN"
+	fi
+
+    # Create directories
+    mkdir -p "${OUTPUT_DIR}" "${PREPROC_DIR}" "${ALIGN_DIR}" "${ASSEMBLY_DIR}" "${MERGE_DIR}" "${ANNOTATION_DIR}" "${FUNCTIONAL_DIR}" "${LOGS_DIR}" "${SR_RB_GTF_DIR}" "${SR_DN_GTF_DIR}" "${MR_RB_GTF_DIR}" "${MR_DN_GTF_DIR}"
+
 
     # ---------------------------
     # Set rRNA Reference Index (STAR requires genomeDir)
@@ -1373,48 +1566,65 @@ step1_rrna_removal() {
     # ---------------------------
     check_dependencies
     setup_conda_environments
+	# ---------------------------
+	# Define Step Order
+	# ---------------------------
+	STEP_ORDER=(1 2 3 4 5 6 7 8 9 10)
+	
+    # ---------------------------
+	# Determine Steps to Run
+	# ---------------------------
+	if [ "$RUN_ALL" = true ]; then
+		STEPS_TO_RUN=("${STEP_ORDER[@]}")
+	else
+		if [ ${#STEPS[@]} -eq 0 ]; then
+			echo_red "Error: You must specify --all or provide --steps to run."
+			show_help
+		fi
+		for STEP in "${STEPS[@]}"; do
+			if [[ ! " ${STEP_ORDER[*]} " =~ " ${STEP} " ]]; then
+				echo_red "Error: Invalid step number '${STEP}'. Must be between 1 and 10."
+				exit 1
+			fi
+		done
+		STEPS_TO_RUN=("${STEPS[@]}")
+	fi
 
-    # ---------------------------
-    # Define Step Functions Mapping
-    # ---------------------------
-    declare -A STEP_FUNCTIONS=(
-        [1]=step1_rrna_removal
-        [2]=step2_read_alignment
-        [3]=step3_gene_transcript_assembly
-        [4]=step4_merging_transcripts_I
-        [5]=step5_merging_transcripts_II
-        [6]=step6_filter_transcripts
-        [7]=step7_isoform_comparison
-        [8]=step8_gtf_correction
-        [9]=step9_functional_annotation
+	# ---------------------------
+	# Define Step Functions Mapping
+	# ---------------------------
+	declare -A STEP_FUNCTIONS=(
+		[1]=step1_rrna_removal
+		[2]=step2_read_alignment
+		[3]=step3_gene_transcript_assembly
+		[4]=step4_merging_transcripts_I
+		[5]=step5_merging_transcripts_II
+		[6]=step6_filter_transcripts
+		[7]=step7_isoform_comparison
+		[8]=step8_gtf_correction
+		[9]=step9_functional_annotation
 		[10]=step10_integrate_functional_annotation
-    )
+	)
 
-    # ---------------------------
-    # Define Step Order
-    # ---------------------------
-    STEP_ORDER=(1 2 3 4 5 6 7 8 9 10)
+	
 
-    # ---------------------------
-    # Determine Steps to Run and Validate Dependencies
-    # ---------------------------
-    if [ "$RUN_ALL" = true ]; then
-        STEPS_TO_RUN=("${STEP_ORDER[@]}")
-    else
-        if [ ${#STEPS[@]} -eq 0 ]; then
-            echo_red  "Error: You must specify --all or provide --steps to run."
-            show_help
-        fi
-        # Validate that steps are within allowed range
-        for STEP in "${STEPS[@]}"; do
-            if [[ ! " ${STEP_ORDER[*]} " =~ " ${STEP} " ]]; then
-                echo_red "Error: Invalid step number '${STEP}'. Must be between 1 and 10."
-                exit 1
-            fi
-        done
-        # Assign steps to run as specified by user
-        STEPS_TO_RUN=("${STEPS[@]}")
-    fi
+	# ---------------------------
+	# Run Selected Steps in Order
+	# ---------------------------
+	for STEP in "${STEP_ORDER[@]}"; do
+		if contains_step "$STEP" "${STEPS_TO_RUN[@]}"; then
+			STEP_FUNCTION="${STEP_FUNCTIONS[$STEP]}"
+			if [ -z "${STEP_FUNCTION}" ]; then
+				echo_red "Error: No function defined for Step $STEP."
+				exit 1
+			fi
+			echo_green "Executing Step $STEP: ${STEP_FUNCTION}"
+			"${STEP_FUNCTION}"
+		fi
+	done
+	
+
+
 
     # ---------------------------
     # Validate Conditional Mandatory Options Based on Selected Steps
@@ -1430,6 +1640,7 @@ step1_rrna_removal() {
 					echo_red  "Error: --dataDir is required."
 					show_help
 				fi
+
 
 				if [ ! -d "${DATA_DIR}/short_reads" ] && [ ! -d "${DATA_DIR}/mix_reads" ]; then
 					echo_red  "Error: --dataDir must contain 'short_reads' and/or 'mix_reads' directories."
@@ -1463,7 +1674,7 @@ step1_rrna_removal() {
                 ;;
             9)  
 			    if [ "$RUN_ALL" = false ]; then
-					if [ -z "${finalGTF}" ] && [ ! -f "${ANNOTATION_DIR}/corrected_with_introns.gtf" ] && [ ! -f "${MERGE_DIR}/prefinal_annotation_filtered.gtf" ]; then
+					if [ -z "${finalGTF}" ] && [ ! -f "${ANNOTATION_DIR}/corrected_with_introns.gtf" ] && [ ! -f "${MERGE_DIR}/filtered_annotation.gtf" ]; then
 						echo_red "Error: --finalGTF must be provided when running Step 9 (Functional Annotation and Filtering)."
 						exit 1
 					fi
@@ -1477,7 +1688,7 @@ step1_rrna_removal() {
 			10)
 			    if [ "$RUN_ALL" = false ]; then
                     # Validate that Step 9 has been run
-                    if [ ! -f "${MERGE_DIR}/prefinal_annotation_filtered.gtf" ] && [ ! -f "${ANNOTATION_DIR}/corrected_with_introns.gtf" ]; then
+                    if [ ! -f "${MERGE_DIR}/filtered_annotation.gtf" ] && [ ! -f "${ANNOTATION_DIR}/corrected_with_introns.gtf" ]; then
                         echo_red "Error: Pre-final annotation GTF is missing. Ensure Steps 1-9 have been successfully completed before running Step 10."
                         exit 1
                     fi
@@ -1508,8 +1719,8 @@ step1_rrna_removal() {
     # =====================================================================
 
     echo_green  "RNA-Seq Bioinformatics Pipeline Completed Successfully!"
-    if [ -f "${FUNCTIONAL_DIR}/final_annotation.gtf" ]; then
-        echo_green  "Final annotated GTF file is located at ${FUNCTIONAL_DIR}/final_annotation.gtf"
+    if [ -f "${FUNCTIONAL_DIR}/annotation_part_I.gtf" ]; then
+        echo_green  "Final annotated GTF file is located at ${FUNCTIONAL_DIR}/annotation_part_I.gtf"
     elif [ -f "${ANNOTATION_DIR}/corrected_with_introns.gtf" ]; then
         echo_green  "Final annotated GTF file is located at ${ANNOTATION_DIR}/corrected_with_introns.gtf"
     fi
