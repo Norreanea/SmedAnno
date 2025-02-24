@@ -44,7 +44,7 @@ sudo apt-get install zlib1g-dev libcurl4-openssl-dev libxml2-dev
 ### Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/SmedAnno.git
+git clone https://github.com/Norreanea/SmedAnno.git
 cd SmedAnno
 ```
 
