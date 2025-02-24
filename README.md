@@ -33,6 +33,11 @@ Before installing and running SmedAnno, ensure that the following prerequisites 
 
 - **Operating System:** Linux-based system recommended.
 - **Conda:** Ensure that Conda is installed on your system.
+- **Install System Development Libraries:**
+ ```bash
+sudo apt-get update
+sudo apt-get install zlib1g-dev libcurl4-openssl-dev libxml2-dev
+```
 
 ## Installation
 
