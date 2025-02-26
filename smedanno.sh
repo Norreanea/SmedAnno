@@ -44,17 +44,30 @@ echo_blue() {
 show_help() {
     echo "Usage: SmedAnno [OPTIONS]"
     echo ""
+	echo "Steps:"
+    echo "  1  - rRNA Removal"
+    echo "  2  - Read Alignment to Reference Genome"
+    echo "  3  - Gene and Transcript Assembly"
+    echo "  4  - Merge Reference-Based Assemblies"
+    echo "  5  - Merge De Novo Assemblies and Create Pre-Final Annotation"
+    echo "  6  - Filter Transcripts with Excessively Long Exons or Genomic Spans"
+    echo "  7  - Isoform Comparison and Annotation"
+    echo "  8  - GTF File Correction and Enhancement"
+    echo "  9  - Functional Annotation and Filtering"
+	echo "  10 - Integrate Functional Annotation (including Overlapped Genes and Transcripts, Reversed Duplicates, Fragmmented and Chimeric Genes Identification )"
+    echo ""
 	echo "General Mandatory Options (if applicable based on steps selected):"
     echo "  --genomeRef PATH              Path to genome reference FASTA file"
     echo "  --dataDir PATH                Path to input RNA-Seq data directory (must contain short_reads and/or mix_reads folders)"
     echo ""
     echo "Mandatory Options for Specific Steps:"
-    echo "  --finalGTF PATH               Path to final GTF file (optional, required for Functional Annotation only)"
-    echo "  --alignDir PATH               Path to directory containing BAM files (optional, required for Gene and Transcript Assembly only)"
-    echo "  --SR_RB_gtf_dir PATH          Directory containing SR_RB.gtf files (optional, required for Merging Assemblies)"
-    echo "  --SR_DN_gtf_dir PATH          Directory containing SR_DN.gtf files (optional, required for Merging Assemblies)"
-    echo "  --MR_RB_gtf_dir PATH          Directory containing MR_RB.gtf files (optional, required for Merging Assemblies)"
-    echo "  --MR_DN_gtf_dir PATH          Directory containing MR_DN.gtf files (optional, required for Merging Assemblies)"
+    echo "  --alignDir PATH               Path to directory containing BAM files (required for Step 3)"
+    echo "  --SR_RB_gtf_dir PATH          Directory containing SR_RB.gtf files (required for Step 4 and 5)"
+    echo "  --SR_DN_gtf_dir PATH          Directory containing SR_DN.gtf files (required for Step 4 and 5)"
+    echo "  --MR_RB_gtf_dir PATH          Directory containing MR_RB.gtf files (required for Step 4 and 5)"
+    echo "  --MR_DN_gtf_dir PATH          Directory containing MR_DN.gtf files (required for Step 4 and 5)"
+	echo "  --finalGTF PATH               Path to final GTF file (required for Step 9 and 10)"
+	echo "  --outputDir PATH              Path to output directory with functional annotation folder (where PFAM, BLAST, and/or ORF outputs are stored; required for Step 10)"
     echo ""
     echo "Optional Options:"
     echo "  --genomeDir PATH              Path to STAR genome directory (will be created if not provided)"
@@ -74,18 +87,6 @@ show_help() {
     echo "  --conda_short VERSION         Set stringtie version for short reads (default: 2.1.1)"
     echo "  --conda_mix VERSION           Set stringtie version for mixed reads (default: 2.2.1)"
     echo "  --help                        Display this help message and exit"
-    echo ""
-    echo "Steps:"
-    echo "  1 - rRNA Removal"
-    echo "  2 - Read Alignment to Reference Genome"
-    echo "  3 - Gene and Transcript Assembly"
-    echo "  4 - Merge Reference-Based Assemblies"
-    echo "  5 - Merge De Novo Assemblies and Create Pre-Final Annotation"
-    echo "  6 - Filter Transcripts with Excessively Long Exons or Genomic Spans"
-    echo "  7 - Isoform Comparison and Annotation"
-    echo "  8 - GTF File Correction and Enhancement"
-    echo "  9 - Functional Annotation and Filtering"
-	echo "  10 - Integrate Functional Annotation (including Overlapped Genes and Transcripts, Reversed Duplicates, Fragmmented and Chimeric Genes Identification )"
     echo ""
     echo "Examples:"
     echo "  Run all steps:"
@@ -162,6 +163,7 @@ CONDA_SHORT_VERSION="${DEFAULT_CONDA_SHORT}"
 CONDA_MIX_VERSION="${DEFAULT_CONDA_MIX}"
 CONDA_VERSION=""
 ENV_APPS="bioapps_env"
+ENV_R="R_env"
 
 
 # ---------------------------
@@ -218,17 +220,27 @@ setup_conda_environments() {
 	
 	if ! conda env list | grep -q "${ENV_APPS}"; then
 		echo_green "Creating conda environment: ${ENV_APPS} with gffcompare, agat, TransDecoder, blast, hmmer, pfam_scan, gffread, samtools, star, and minimap2"
-		if ! conda create -y -n "${ENV_APPS}" gffcompare agat TransDecoder blast hmmer pfam_scan gffread samtools star minimap2 &> "${OUTPUT_DIR}/logs/conda_create_${ENV_APPS}.log"; then
+		if ! conda create -y -n "${ENV_APPS}" gffcompare agat TransDecoder blast hmmer pfam_scan gffread samtools star minimap2&> "${OUTPUT_DIR}/logs/conda_create_${ENV_APPS}.log"; then
 			echo_red "Error: Failed to create ${ENV_APPS} environment. Check ${OUTPUT_DIR}/logs/conda_create_${ENV_APPS}.log for details."
 			exit 1
 		fi
 	else
     echo_green "Conda environment '${ENV_APPS}' already exists."
-fi
+	fi 
+	
+	if ! conda env list | grep -q "${ENV_R}"; then
+		echo_green "Creating conda environment: ${ENV_R} with r-base, rtracklayer, genomicfeatures, genomicranges, zlib, libcurl, and libxml2"
+		if ! conda create -y -n "${ENV_R}" r-base=4.4.2 zlib libcurl libxml2 bioconductor-rtracklayer bioconductor-genomicfeatures bioconductor-genomicranges&> "${OUTPUT_DIR}/logs/conda_create_${ENV_R}.log"; then
+			echo_red "Error: Failed to create ${ENV_R} environment. Check ${OUTPUT_DIR}/logs/conda_create_${ENV_R}.log for details."
+			exit 1
+		fi
+	else
+    echo_green "Conda environment '${ENV_R}' already exists."
+    fi
 
 
     echo_green "Conda environments set up successfully."
-}
+	}
 
 # ---------------------------
 # Helper Function: contains
@@ -1133,12 +1145,12 @@ step1_rrna_removal() {
         echo_green  "Adding intron features to GTF file using AGAT"
         agat_sp_add_introns.pl -g "${CORRECTED_GTF}" -o "${CORRECTED_INTRONS_GTF}"
 		
-		# Move all AGAT log files (*.agat.txt) from the current directory to the logs directory in the output folder
-		if compgen -G "./*.agat.txt" > /dev/null; then
+		# Move all AGAT log files (*.agat.log) from the current directory to the logs directory in the output folder
+		if compgen -G "./*.agat.log" > /dev/null; then
 			echo_green "Moving AGAT log files to ${OUTPUT_DIR}/logs/"
-			mv ./*.agat.txt "${OUTPUT_DIR}/logs/"
+			mv ./*.agat.log "${OUTPUT_DIR}/logs/"
 		else
-			echo_green "No AGAT log files (*.agat.txt) found in the current directory."
+			echo_green "No AGAT log files (*.agat.log) found in the current directory."
 		fi
 
         conda deactivate
@@ -1174,7 +1186,6 @@ step1_rrna_removal() {
         # ORF Prediction with TransDecoder
         echo_green  "Running TransDecoder to predict ORFs"
         TransDecoder.LongOrfs -t "${TRANSCRIPTS_FA}" -m "${MIN_ORF_LENGTH}" -O "${FUNCTIONAL_DIR}/TransDecoder"
-		# Note: Use --min_prot_len instead of -m, and remove the -O option.
         #TransDecoder.LongOrfs -t "${TRANSCRIPTS_FA}" --min_prot_len "${MIN_ORF_LENGTH}"
 
         # Predict likely coding regions
@@ -1280,7 +1291,7 @@ step1_rrna_removal() {
 
 	step10_integrate_functional_annotation() {
 		echo_blue "Starting Step 10: Integrate Functional Annotation (R Script)"
-		
+		conda activate ${ENV_R}
 		# Define paths
 		FUNCTIONAL_SCRIPT="functional_annotation.R"  
 		ANNOTATION_DIR="${OUTPUT_DIR}/annotation"
@@ -1293,6 +1304,11 @@ step1_rrna_removal() {
 			echo_red "Error: R script not found at ${FUNCTIONAL_SCRIPT}"
 			exit 1
 		fi
+		
+		# Set up a personal R library in your output directory
+		export R_LIBS_USER="${OUTPUT_DIR}/R_lib"
+		mkdir -p "${R_LIBS_USER}"
+
 
 		# Run the R script with required arguments
 		if [ -n "$GENOME_GTF" ]; then
@@ -1307,9 +1323,23 @@ step1_rrna_removal() {
 									   --output_dir "$OUTPUT_DIR" \
 									   >> "$LOGS_DIR/functional_annotation.log" 2>&1
         fi
+		EXIT_STATUS=$?
+		conda deactivate
+		
+		FINAL_GTF="${FUNCTIONAL_DIR}/annotation_part_I.gtf"
+		if [ ! -f "${FINAL_GTF}" ]; then
+			echo_red "Error: Final annotated GTF file not found. Pipeline may not have completed successfully. Please check ${LOGS_DIR}/functional_annotation.log for details."
+			exit 1
+		fi
+		# Check log file for any error keywords (case-insensitive)
+		if grep -qi "error" "$LOGS_DIR/functional_annotation.log"; then
+			echo_red "Error: Functional annotation R script log indicates errors. Check ${LOGS_DIR}/functional_annotation.log for details."
+			exit 1
+		fi
+		
 		# Check if R script ran successfully
-		if [ $? -ne 0 ]; then
-			echo_red "Error: Functional annotation R script failed. Check ${LOGS_DIR}/functional_annotation.log for details."
+		if [ $EXIT_STATUS -ne 0 ]; then
+			echo_red "Error: Functional annotation R script failed with exit code $EXIT_STATUS. Check ${LOGS_DIR}/functional_annotation.log for details."
 			exit 1
 		else
 			echo_green "Functional annotation completed successfully."
@@ -1342,6 +1372,7 @@ step1_rrna_removal() {
     BLAST_DB_SwissProt=""
     PFAM_DB=""
     DATA_DIR=""
+	functional_dir=""
     OUTPUT_DIR="./outputDir"
     THREADS=8
     MIN_ORF_LENGTH=100
@@ -1350,7 +1381,7 @@ step1_rrna_removal() {
     FUNCTIONAL_METHODS="BLASTp,BLASTx,PFAM"  # Default: all methods
 
     # Use getopt for parsing long options
-    if ! PARSED_OPTIONS=$(getopt -n "$0" -o "" --long genomeDir:,rrnaRef:,genomeRef:,genomeGTF:,ALIGN_DIR:,finalGTF:,SR_RB_gtf_dir:,SR_DN_gtf_dir:,MR_RB_gtf_dir:,MR_DN_gtf_dir:,blastDB_SwissProt:,pfamDB:,dataDir:,outputDir:,threads:,minOrfLength:,maxExonLength:,maxTranscriptLength:,steps:,all,help,functionalMethods:,conda:,conda_short:,conda_mix: -- "$@"); then
+    if ! PARSED_OPTIONS=$(getopt -n "$0" -o "" --long genomeDir:,rrnaRef:,genomeRef:,genomeGTF:,ALIGN_DIR:,finalGTF:,SR_RB_gtf_dir:,SR_DN_gtf_dir:,MR_RB_gtf_dir:,MR_DN_gtf_dir:,blastDB_SwissProt:,functional_dir:,pfamDB:,dataDir:,outputDir:,threads:,minOrfLength:,maxExonLength:,maxTranscriptLength:,steps:,all,help,functionalMethods:,conda:,conda_short:,conda_mix: -- "$@"); then
 		show_help
 	fi
 	eval set -- "$PARSED_OPTIONS"
@@ -1370,6 +1401,7 @@ step1_rrna_removal() {
 			--blastDB_SwissProt) BLAST_DB_SwissProt="$2"; shift 2 ;;
 			--pfamDB) PFAM_DB="$2"; shift 2 ;;
 			--dataDir) DATA_DIR="$2"; shift 2 ;;
+			--functional_dir) functional_dir="$2"; shift 2 ;;
 			--outputDir) OUTPUT_DIR="$2"; shift 2 ;;
 			--threads) THREADS="$2"; shift 2 ;;
 			--minOrfLength) MIN_ORF_LENGTH="$2"; shift 2 ;;
@@ -1687,11 +1719,15 @@ step1_rrna_removal() {
                 ;;
 			10)
 			    if [ "$RUN_ALL" = false ]; then
-                    # Validate that Step 9 has been run
-                    if [ ! -f "${MERGE_DIR}/filtered_annotation.gtf" ] && [ ! -f "${ANNOTATION_DIR}/corrected_with_introns.gtf" ]; then
-                        echo_red "Error: Pre-final annotation GTF is missing. Ensure Steps 1-9 have been successfully completed before running Step 10."
-                        exit 1
-                    fi
+                    if [ -z "${outputDir}" ]; then
+					echo_red "Error: --outputDir is required for Step 10 (Integrate Functional Annotation)."
+					exit 1
+				fi
+				# Then check that at least one pre-final annotation GTF exists.
+				if [ ! -f "${MERGE_DIR}/filtered_annotation.gtf" ] && [ ! -f "${ANNOTATION_DIR}/corrected_with_introns.gtf" ]; then
+					echo_red "Error: Pre-final annotation GTF is missing. Ensure Steps 1-9 have been successfully completed before running Step 10."
+					exit 1
+				fi
                 fi
                     ;;
             *)
