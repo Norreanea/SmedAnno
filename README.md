@@ -49,7 +49,7 @@ cd SmedAnno
 ```
 
 ### Set Up Conda Environments
-SmedAnno utilizes two Conda environments for different versions of StringTie:
+SmedAnno utilizes two Conda environments for different versions of StringTie (default):
 
 - **stringtie211:** Contains StringTie version 2.1.1 for steps using short reads.
 - **stringtie221:** Contains StringTie version 2.2.1 for steps using mixed reads and merging annotations.
@@ -59,61 +59,70 @@ Ensure that you have added the required Conda channels (bioconda and conda-forge
 ## Usage
 
 ```bash
-Usage: smedanno.sh [OPTIONS]
-     
-     Mandatory Options for Specific Steps:
-       --finalGTF PATH               Path to final GTF file (required for Functional Annotation only)
-       --alignDir PATH               Path to directory containing BAM files (required for Gene and Transcript Assembly only)
-       --SR_RB_gtf_dir PATH          Directory containing SR_RB.gtf files (required for Merging Assemblies)
-       --SR_DN_gtf_dir PATH          Directory containing SR_DN.gtf files (optional for Merging Assemblies)
-       --MR_RB_gtf_dir PATH          Directory containing MR_RB.gtf files (optional for Merging Assemblies)
-       --MR_DN_gtf_dir PATH          Directory containing MR_DN.gtf files (optional for Merging Assemblies)
-     
-     General Mandatory Options (if applicable based on steps selected):
-       --genomeRef PATH              Path to genome reference FASTA file
-       --dataDir PATH                Path to input RNA-Seq data directory (must contain short_reads and/or mix_reads folders)
-     
-     Optional Options:
-       --genomeDir PATH              Path to STAR genome directory (will be created if not provided)
-       --genomeGTF PATH              Path to genome annotation GTF file (optional, required for Reference-Based assembly)
-       --rrnaRef PATH                Path to rRNA reference FASTA file
-       --blastDB_SwissProt PATH      Path to BLAST SwissProt database
-       --pfamDB PATH                 Path to PFAM database directory
-       --outputDir PATH              Path to output directory (default: ./outputDir)
-       --threads N                   Number of CPU threads to use (default: 8)
-       --minOrfLength N              Minimum ORF length for TransDecoder (default: 100)
-       --steps LIST                  Comma-separated list of steps to run (1-8, include 5.1)
-       --all                         Run all steps sequentially
-       --functionalMethods METHODS    Comma-separated list of functional annotation methods to apply (BLASTp,BLASTx,PFAM; default: all)
-       --help                        Display this help message and exit
-     
-     Steps:
-       1 - rRNA Removal
-       2 - Read Alignment to Reference Genome
-       3 - Gene and Transcript Assembly
-       4 - Merge Reference-Based Assemblies
-       5 - Merge De Novo Assemblies and Create Pre-Final Annotation
-       6 - Filter Transcripts with Excessively Long Exons or Genomic Spans
-       7 - Isoform Comparison and Annotation
-       8 - GTF File Correction and Enhancement
-       9 - Functional Annotation and Filtering
-      10 - Integrate Functional Annotation (including Overlapped Genes and Transcripts, Reversed Duplicates, Fragmmented and Chimeric Genes Identification )
-     
-     Examples:
-       Run all steps:
-         smedanno.sh --genomeRef genome.fa --dataDir ./data --outputDir ./output --threads 4 --all
-     
-       Run Steps 1 and 2 only (rRNA Removal and Read Alignment):
-         smedanno.sh --genomeRef genome.fa --dataDir ./data --outputDir ./output --threads 4 --steps 1,2
-     
-       Run Only Step 3 (Gene and Transcript Assembly) with BAM files:
-         smedanno.sh --alignDir ./bam_files --outputDir ./output --threads 4 --steps 3
-     
-       Run Merging Assemblies Steps 4 and 5 with specific GTF directories:
-         smedanno.sh --SR_RB_gtf_dir ./gtf/SR_RB --SR_DN_gtf_dir ./gtf/SR_DN --outputDir ./output --threads 4 --steps 4,5
-     
-       Run Functional Annotation with specific methods:
-         smedanno.sh --finalGTF final_annotation.gtf --outputDir ./output --threads 4 --steps 8 --functionalMethods BLASTp,PFAM --genomeRef genome.fa
+Usage: ./smedanno.sh [OPTIONS]
+
+Steps:
+  1  - rRNA Removal
+  2  - Read Alignment to Reference Genome
+  3  - Gene and Transcript Assembly
+  4  - Merge Reference-Based Assemblies
+  5  - Merge De Novo Assemblies and Create Pre-Final Annotation
+  6  - Filter Transcripts with Excessively Long Exons or Genomic Spans
+  7  - Isoform Comparison and Annotation
+  8  - GTF File Correction and Enhancement
+  9  - Functional Annotation and Filtering
+  10 - Integrate Functional Annotation (including Overlapped Genes and Transcripts, Reversed Duplicates, Fragmmented and Chimeric Genes Identification )
+
+General Mandatory Options (if applicable based on steps selected):
+  --genomeRef PATH              Path to genome reference FASTA file
+  --dataDir PATH                Path to input RNA-Seq data directory (must contain short_reads and/or mix_reads folders)
+
+Mandatory Options for Specific Steps:
+  --alignDir PATH               Path to directory containing BAM files (required for Step 3)
+  --SR_RB_gtf_dir PATH          Directory containing SR_RB.gtf files (required for Step 4 and 5)
+  --SR_DN_gtf_dir PATH          Directory containing SR_DN.gtf files (required for Step 4 and 5)
+  --MR_RB_gtf_dir PATH          Directory containing MR_RB.gtf files (required for Step 4 and 5)
+  --MR_DN_gtf_dir PATH          Directory containing MR_DN.gtf files (required for Step 4 and 5)
+  --finalGTF PATH               Path to final GTF file (required for Step 9 and 10)
+  --outputDir PATH              Path to output directory with functional annotation folder (where PFAM, BLAST, and/or ORF outputs are stored; required for Step 10)
+
+Optional Options:
+  --genomeDir PATH              Path to STAR genome directory (will be created if not provided)
+  --genomeGTF PATH              Path to genome annotation GTF file (optional, required for Reference-Based assembly)
+  --rrnaRef PATH                Path to rRNA reference FASTA file
+  --blastDB_SwissProt PATH      Path to BLAST SwissProt database
+  --pfamDB PATH                 Path to PFAM database directory
+  --outputDir PATH              Path to output directory (default: ./outputDir)
+  --threads N                   Number of CPU threads to use (default: 8)
+  --minOrfLength N              Minimum ORF length for TransDecoder (default: 100)
+  --maxExonLength N             Maximum allowed exon length (default: 10000)
+  --maxTranscriptLength N       Maximum allowed transcript length (default: 100000)
+  --steps LIST                  Comma-separated list of steps to run (1-10)
+  --all                         Run all steps sequentially
+  --functionalMethods METHODS   Comma-separated list of functional annotation methods to apply (BLASTp,BLASTx,PFAM; default: all)
+  --conda VERSION               Set stringtie version for both short and mix reads (if not using individual overrides)
+  --conda_short VERSION         Set stringtie version for short reads (default: 2.1.1)
+  --conda_mix VERSION           Set stringtie version for mixed reads (default: 2.2.1)
+  --help                        Display this help message and exit
+
+Examples:
+  Run all steps:
+    ./smedanno.sh --genomeRef genome.fa --dataDir ./data --outputDir ./output --threads 4 --all
+
+  Run all steps with custom stringtie version 3.0.0 for both environments:
+    ./smedanno.sh --genomeRef genome.fa --dataDir ./data --outputDir ./output --threads 4 --all --conda 3.0.0
+
+  Run Steps 1 and 2 only (rRNA Removal and Read Alignment):
+    ./smedanno.sh --genomeRef genome.fa --dataDir ./data --outputDir ./output --threads 4 --steps 1,2
+
+  Run Only Step 3 (Gene and Transcript Assembly) with BAM files:
+    ./smedanno.sh --alignDir ./bam_files --outputDir ./output --threads 4 --steps 3
+
+  Run Merging Assemblies Steps 4 and 5 with specific GTF directories:
+    ./smedanno.sh --SR_RB_gtf_dir ./gtf/SR_RB --SR_DN_gtf_dir ./gtf/SR_DN --outputDir ./output --threads 4 --steps 4,5
+
+  Run Functional Annotation with specific methods:
+    ./smedanno.sh --finalGTF corrected_with_introns.gtf --outputDir ./output --threads 4 --steps 8 --functionalMethods BLASTp,PFAM --genomeRef genome.fa
 ```
 
 ## Output
