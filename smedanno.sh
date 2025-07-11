@@ -69,6 +69,12 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		echo "  --MR_RB_gtf_dir PATH          Directory containing MR_RB.gtf files (optional, required for Merging Assemblies)"
 		echo "  --MR_DN_gtf_dir PATH          Directory containing MR_DN.gtf files (optional, required for Merging Assemblies)"
 		echo ""
+		echo "Long-Read Trimming Options (Filtlong for Step 0):"
+		echo "  --longread_min_len N          Minimum length for long reads (default: 1000)"
+		echo "  --longread_keep_percent N     Keep the best N percent of reads (default: 95)"
+		echo "  --longread_target_bases N     Target a total number of bases, keeping the best reads."
+		echo "  NOTE: These options provide basic filtering. For best results, use dedicated tools before using SmedAnno."
+		echo ""
 		echo "Optional options:"
 		echo "  --genomeDir PATH              Path to STAR genome directory (will be created if not provided)"
 		echo "  --genomeGTF PATH              Path to genome annotation GTF file (optional, required for Reference-Based assembly)"
@@ -322,12 +328,23 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		echo_blue "Validating user-provided parameters..."
 		
         # Helper functions
-		is_positive_integer() {[[ "$1" =~ ^[1-9][0-9]*$ ]]}
-		is_positive_float() {[[ "$1" =~ ^[0-9]+([.][0-9]+)?(e-?[0-9]+)?$ ]]}
+		is_positive_integer() {
+			[[ "$1" =~ ^[1-9][0-9]*$ ]]
+		}
+		is_positive_float() {
+			[[ "$1" =~ ^[0-9]+([.][0-9]+)?(e-?[0-9]+)?$ ]]
+		}
+		is_valid_version() {
+			local version_to_check="$1"; shift
+			contains "${version_to_check}" "$@"
+		}
+		is_version_ge() {
+			[[ "$(printf '%s\n' "$1" "$2" | sort -V | head -n1)" == "$2" ]]
+		}
+		
+		# StringTie version validation
 		local valid_stringtie_versions=("2.0.1" "2.0.2" "2.0.3" "2.0.4" "2.0.5" "2.0.6" "2.1.0" "2.1.1" "2.1.2" "2.1.3" "2.1.4" "2.1.6" "2.1.7" "2.2.0" "2.2.1" "2.2.2" "2.2.3" "3.0.0" "3.0.1")
 		local min_mix_version="2.1.6"
-		is_valid_version() {local version_to_check="$1"; shift contains "${version_to_check}" "$@"}
-		is_version_ge() {[[ "$(printf '%s\n' "$1" "$2" | sort -V | head -n1)" == "$2" ]]}
 		
 		# StringTie version validation
 		if ! is_valid_version "${STRINGTIE_SHORT_VERSION}" "${valid_stringtie_versions[@]}"; then
@@ -386,6 +403,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		is_positive_integer "${LARGE_INTRON_THRESHOLD}" || { echo_red "Error: --largeIntronThreshold must be a positive integer."; show_help; }
 		[[ "${LARGE_INTRON_THRESHOLD}" -gt 10000000 ]] && { echo_red "Warning: --largeIntronThreshold seems unusually high (>10,000,000). Please verify."; }
 		is_positive_integer "${PFAM_BITSCORE}" || { echo_red "Error: --pfamBitScore must be a positive integer."; show_help; }
+		is_positive_integer "${LONGREAD_MIN_LEN}" || { echo_red "Error: --longread_min_len must be a positive integer."; show_help; }
+		is_positive_integer "${LONGREAD_KEEP_PERCENT}" || { echo_red "Error: --longread_keep_percent must be a positive integer."; show_help; }
+		is_positive_integer "${LONGREAD_TARGET_BASES}" || { echo_red "Error: --longread_target_bases must be a positive integer."; show_help; }
 		
 		is_positive_integer "${TRIM_QUAL}" || { echo_red "Error: --trimQual must be a positive integer."; show_help; }
 		[[ "${TRIM_QUAL}" -gt 40 ]] && { echo_red "Error: --trimQual should be within the Phred33 range (0-40)."; show_help; }
@@ -409,30 +429,49 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	# Step 0: Read trimming / quality-filtering
 	# ---------------------------
 	step0_preprocess_trimming() {
-		echo_blue  "Starting Step 0: Read trimming / filtering with Trim Galore!"
-
-		TG_OPTS="--paired --cores ${THREADS} --quality ${TRIM_QUAL}"
+		echo_blue  "Starting Step 0: Read trimming / filtering"
+		
+		# --- Short Read Trimming ---
+		local TG_OPTS="--paired --cores ${THREADS} --quality ${TRIM_QUAL}"
 		[[ -n "${TRIM_ADAPTER}" ]] && TG_OPTS+=" --adapter \"${TRIM_ADAPTER}\""
 		[[ -n "${TRIM_LEN}" ]]     && TG_OPTS+=" --length ${TRIM_LEN}"
-		TG_OPTS+=" ${TRIM_GZIP}"
+		[[ -n "${TRIM_GZIP}" ]]    && TG_OPTS+=" --gzip"
 
-		if [[ ${#SHORT_ONLY_SAMPLES[@]} -gt 0 ]]; then
-			for SAMPLE in "${SHORT_ONLY_SAMPLES[@]}"; do
-				R1=$(find_read_file "${SHORT_ONLY_DIR}" "${SAMPLE}" "1")
-				R2=$(find_read_file "${SHORT_ONLY_DIR}" "${SAMPLE}" "2")
-				[[ -z "$R1" || -z "$R2" ]] && { echo_red "Missing FASTQ for \"${SAMPLE}\""; exit 1; }
-				echo_green "Trim Galore SR sample \"${SAMPLE}\""
+		if [[ ${#SHORT_ONLY_SAMPLES[@]} -gt 0 || ${#MIX_SAMPLES[@]} -gt 0 ]]; then
+			echo_green "Processing short reads with Trim Galore..."
+			for SAMPLE in "${SHORT_ONLY_SAMPLES[@]}" "${MIX_SAMPLES[@]}"; do
+				local READ_DIR
+				[[ -d "${SHORT_ONLY_DIR}" ]] && contains "$SAMPLE" "${SHORT_ONLY_SAMPLES[@]}" && READ_DIR="$SHORT_ONLY_DIR"
+				[[ -d "${MIX_SHORT_DIR}" ]] && contains "$SAMPLE" "${MIX_SAMPLES[@]}" && READ_DIR="$MIX_SHORT_DIR"
+
+				R1=$(find_read_file "${READ_DIR}" "${SAMPLE}" "1")
+				R2=$(find_read_file "${READ_DIR}" "${SAMPLE}" "2")
+				[[ -z "$R1" || -z "$R2" ]] && { echo_red "Missing FASTQ for \"${SAMPLE}\""; continue; }
+				
 				trim_galore ${TG_OPTS} -o "${PREPROC_DIR}" "${R1}" "${R2}"
 			done
 		fi
 
+		# --- Long Read Filtering (for mixed samples) ---
 		if [[ ${#MIX_SAMPLES[@]} -gt 0 ]]; then
+			echo_green "Processing long reads with Filtlong..."
 			for SAMPLE in "${MIX_SAMPLES[@]}"; do
-				R1=$(find_read_file "${MIX_SHORT_DIR}" "${SAMPLE}" "1")
-				R2=$(find_read_file "${MIX_SHORT_DIR}" "${SAMPLE}" "2")
-				[[ -z "$R1" || -z "$R2" ]] && { echo_red "Missing FASTQ for \"${SAMPLE}\""; exit 1; }
-				echo_green "Trim Galore MR sample \"${SAMPLE}\""
-				trim_galore ${TG_OPTS} -o "${PREPROC_DIR}" "${R1}" "${R2}"
+				local LONG_READ_IN; LONG_READ_IN=$(find_read_file "${MIX_LONG_DIR}" "${SAMPLE}" "_long_reads")
+				[ -z "${LONG_READ_IN}" ] && { echo_green "No long reads found for mixed sample \"${SAMPLE}\""; continue; }
+
+				local LONG_READ_OUT="${PREPROC_DIR}/${SAMPLE}_long_reads_filtered.fastq"
+				local FL_OPTS="--min_length ${LONGREAD_MIN_LEN} --keep_percent ${LONGREAD_KEEP_PERCENT}"
+				[[ -n "${LONGREAD_TARGET_BASES}" ]] && FL_OPTS+=" --target_bases ${LONGREAD_TARGET_BASES}"
+				
+				# Use presets based on simple filename check
+				if [[ "${LONG_READ_IN}" == *"[Pp]ac[Bb]io"* || "${LONG_READ_IN}" == *"[Hh][Ii][Ff][Ii]"* ]]; then
+					FL_OPTS+=" --pacbio_corr"
+				else # Default to ONT settings
+					FL_OPTS+=" --ont_guppy"
+				fi
+				
+				echo_green "Filtering long reads for sample \"${SAMPLE}\"..."
+				filtlong ${FL_OPTS} "${LONG_READ_IN}" > "${LONG_READ_OUT}"
 			done
 		fi
 		echo_blue "Step 0 completed: trimmed reads are in \"${OUTPUT_PATH}/preprocessing\""
@@ -1022,6 +1061,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	MITO_PATTERN="[Mm]ito|[Mm]itochondria|mtDNA"
 	GENETIC_CODE_NUCL="Universal"
 	GENETIC_CODE_MITO="Mitochondrial-Vertebrates"
+	LONGREAD_MIN_LEN=1000
+	LONGREAD_KEEP_PERCENT=95
 	RUN_ALL=false
 	STEPS=()
 	
@@ -1070,6 +1111,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 			--pfamBitScore) PFAM_BITSCORE="$2"; shift 2 ;;
 			--pfamCoverage) PFAM_COVERAGE="$2"; shift 2 ;;
 			--interproEvalue) INTERPRO_EVALUE="$2"; shift 2 ;;
+			--longread_min_len) LONGREAD_MIN_LEN="$2"; shift 2 ;;
+			--longread_keep_percent) LONGREAD_KEEP_PERCENT="$2"; shift 2 ;;
+			--longread_target_bases) LONGREAD_TARGET_BASES="$2"; shift 2 ;;
 			-h|--help) show_help ;;
 			*) echo "Unknown parameter passed: $1"; show_help ;;
 		esac
@@ -1131,29 +1175,91 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	echo_blue "Beginning pipeline execution..."
 	for STEP in "${STEP_ORDER[@]}"; do
 		if contains "$STEP" "${STEPS_TO_RUN[@]}"; then
+			
+			# --- Find required input file for the current step ---
+			INPUT_GTF="" # Reset for each step
+			if [ "$STEP" -ge 6 ]; then
+				if [ -n "${finalGTF}" ] && [ -f "${finalGTF}" ]; then
+					INPUT_GTF="${finalGTF}"
+				elif [ -f "${ANNOTATION_DIR}/final_annotation.gtf" ]; then
+					INPUT_GTF="${ANNOTATION_DIR}/final_annotation.gtf"
+				elif [ -f "${ANNOTATION_DIR}/corrected_with_introns.gtf" ]; then
+					INPUT_GTF="${ANNOTATION_DIR}/corrected_with_introns.gtf"
+				elif [ -f "${MERGE_DIR}/filtered_annotation.gtf" ]; then
+					INPUT_GTF="${MERGE_DIR}/filtered_annotation.gtf"
+				elif [ -f "${MERGE_DIR}/prefinal_annotation.gtf" ]; then
+					INPUT_GTF="${MERGE_DIR}/prefinal_annotation.gtf"
+				fi
+			fi
+
 			# --- Conditional Validation ---
 			case "$STEP" in
-				0|1|2)
-					[ -z "${DATA_DIR}" ] && { echo_red "Error: --dataDir is required for Step ${STEP}."; exit 1; }
-					[ ! -d "${DATA_DIR}/short_reads" ] && [ ! -d "${DATA_DIR}/mix_reads" ] && { echo_red "Error: --dataDir must contain 'short_reads' and/or 'mix_reads'."; exit 1; }
+				0)
+					[ -z "${DATA_DIR}" ] && { echo_red "Error: --dataDir is required for Step 0."; exit 1; }
+					;;
+				1)
+					[ -z "${DATA_DIR}" ] && { echo_red "Error: --dataDir is required for Step 1."; exit 1; }
+					[ -z "${RRNA_REF}" ] && { echo_green "Warning: --rrnaRef not provided. Skipping Step 1."; continue 2; }
+					;;
+				2)
+					[ -z "${DATA_DIR}" ] && { echo_red "Error: --dataDir is required for Step 2."; exit 1; }
+					[ -z "${GENOME_REF}" ] && { echo_red "Error: --genomeRef is required for Step 2."; exit 1; }
 					;;
 				3)
 					[ -z "${ALIGN_DIR}" ] && [ ! -d "${ALIGN_DIR_INTERNAL}" ] && { echo_red "Error: --alignDir must be provided for Step 3 if not running from Step 2."; exit 1; }
 					;;
-				4|5|6)
-				    [ -z "${SR_RB_GTF_DIR}" ] && [ -z "${SR_DN_GTF_DIR}" ] && [ -z "${MR_RB_GTF_DIR}" ] && [ -z "${MR_DN_GTF_DIR}" ] && [ ! -d "${SR_RB_GTF_DIR_INTERNAL}" ] && [ ! -d "${SR_DN_GTF_DIR_INTERNAL}" ] && [ ! -d "${MR_RB_GTF_DIR_INTERNAL}" ] && [ ! -d "${MR_DN_GTF_DIR_INTERNAL}" ] && { echo_red "Error: GTF directories not found for merging steps."; exit 1; }
+				4|5)
+					# These steps can be skipped if a suitable downstream file exists
+					[ -n "$INPUT_GTF" ] && { echo_green "Found downstream GTF \"$INPUT_GTF\". Skipping Step $STEP."; continue 2; }
+					[ -z "${SR_RB_GTF_DIR}" ] && [ -z "${SR_DN_GTF_DIR}" ] && [ -z "${MR_RB_GTF_DIR}" ] && [ -z "${MR_DN_GTF_DIR}" ] && \
+					[ ! -d "${SR_RB_GTF_DIR_INTERNAL}" ] && [ ! -d "${SR_DN_GTF_DIR_INTERNAL}" ] && [ ! -d "${MR_RB_GTF_DIR_INTERNAL}" ] && \
+					[ ! -d "${MR_DN_GTF_DIR_INTERNAL}" ] && [ ! -n "$INPUT_GTF" ] && { echo_red "Error: GTF directories not found for merging steps."; exit 1; }
 					;;
-				7|8|9|10)
-					[ -z "${GENOME_REF}" ] && { echo_red "Error: --genomeRef must be provided for annotation steps (7-10)."; exit 1; }
+				6|7|8)
+					[ -z "$INPUT_GTF" ] && { echo_red "Error: A valid input GTF is required for Step $STEP. Provide with --finalGTF or run previous steps."; exit 1; }
+					;;
+				9|10)
+					[ -z "$INPUT_GTF" ] && { echo_red "Error: A valid input GTF is required for Step $STEP. Provide with --finalGTF or run previous steps."; exit 1; }
+					[ -z "${GENOME_REF}" ] && { echo_red "Error: --genomeRef must be provided for Step $STEP."; exit 1; }
 					;;
 			esac
 
 			# --- Execute Step ---
 			STEP_FUNCTION="${STEP_FUNCTIONS[$STEP]}"
 			echo_green "Executing Step $STEP: ${STEP_FUNCTION}"
-			"${STEP_FUNCTION}"
+			# Pass the determined input GTF to the relevant steps
+			if [ "$STEP" -ge 6 ]; then
+				"${STEP_FUNCTION}" "${INPUT_GTF}"
+			else
+				"${STEP_FUNCTION}"
+			fi
 		fi
 	done
+	# for STEP in "${STEP_ORDER[@]}"; do
+		# if contains "$STEP" "${STEPS_TO_RUN[@]}"; then
+			# # --- Conditional Validation ---
+			# case "$STEP" in
+				# 0|1|2)
+					# [ -z "${DATA_DIR}" ] && { echo_red "Error: --dataDir is required for Step ${STEP}."; exit 1; }
+					# [ ! -d "${DATA_DIR}/short_reads" ] && [ ! -d "${DATA_DIR}/mix_reads" ] && { echo_red "Error: --dataDir must contain 'short_reads' and/or 'mix_reads'."; exit 1; }
+					# ;;
+				# 3)
+					# [ -z "${ALIGN_DIR}" ] && [ ! -d "${ALIGN_DIR_INTERNAL}" ] && { echo_red "Error: --alignDir must be provided for Step 3 if not running from Step 2."; exit 1; }
+					# ;;
+				# 4|5|6)
+				    # [ -z "${SR_RB_GTF_DIR}" ] && [ -z "${SR_DN_GTF_DIR}" ] && [ -z "${MR_RB_GTF_DIR}" ] && [ -z "${MR_DN_GTF_DIR}" ] && [ ! -d "${SR_RB_GTF_DIR_INTERNAL}" ] && [ ! -d "${SR_DN_GTF_DIR_INTERNAL}" ] && [ ! -d "${MR_RB_GTF_DIR_INTERNAL}" ] && [ ! -d "${MR_DN_GTF_DIR_INTERNAL}" ] && { echo_red "Error: GTF directories not found for merging steps."; exit 1; }
+					# ;;
+				# 7|8|9|10)
+					# [ -z "${GENOME_REF}" ] && { echo_red "Error: --genomeRef must be provided for annotation steps (7-10)."; exit 1; }
+					# ;;
+			# esac
+
+			# # --- Execute Step ---
+			# STEP_FUNCTION="${STEP_FUNCTIONS[$STEP]}"
+			# echo_green "Executing Step $STEP: ${STEP_FUNCTION}"
+			# "${STEP_FUNCTION}"
+		# fi
+	# done
 	
 	# =====================================================================
 	# Pipeline Completed
