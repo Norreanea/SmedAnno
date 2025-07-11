@@ -1,0 +1,33 @@
+name: smedanno
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.10
+  - samtools=1.15.1
+  - star=2.7.10a
+  - gffcompare=0.12.6
+  - agat=1.0.0
+  - transdecoder=5.7.0
+  - blast=2.16.0
+  - hmmer=3.4
+  - minimap2=2.24
+  - gffread=0.12.7
+  - cutadapt
+  - trim-galore
+  - pfam_scan
+  - r-base=4.2
+  - r-dplyr
+  - r-data.table
+  - r-stringr
+  - r-tidyr
+  - r-httr
+  - r-jsonlite
+  - r-purrr
+  - r-ggplot2
+  - bioconductor-rtracklayer
+  - bioconductor-genomicfeatures
+  - bioconductor-genomicranges
+  - bioconductor-uniprot.ws
+  - bioconductor-reactome.db
+prefix: /opt/conda/envs/smedanno

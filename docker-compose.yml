@@ -1,0 +1,16 @@
+services:
+  smedanno:
+    build: .
+    image: smedanno
+    # To ensure variables from .env are available inside the container
+    env_file:
+      - .env
+    working_dir: /smedanno
+    volumes:
+      # Mounts the script's directory
+      - .:/smedanno
+      # Mounts the data and output directories using variables from the .env file
+      - ${DATA_PATH}:/data
+      - ${OUTPUT_PATH}:/output
+      # Dedicated mount for the reference genome's directory
+      - ${GENOME_REF_DIR_PATH}:/genome_ref_dir
