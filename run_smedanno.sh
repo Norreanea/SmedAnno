@@ -1,92 +1,73 @@
 #!/bin/bash
 
 set -e
-# This wrapper script will parse the user's file paths, create the .env file on the fly, and then execute the docker-compose command.
+# This wrapper script will parse user file paths, create the .env file, and execute docker-compose.
 
 # --- Default container-side paths ---
 CONTAINER_DATA_PATH="/data"
 CONTAINER_OUTPUT_PATH="/output"
-CONTAINER_GENOME_DIR_PATH="/genome_ref_dir"
 
-# --- Variables for smarter validation ---
-dataDir_is_required=false
-steps_to_run=""
-HOST_GENOME_REF_DIR=""
 SMEDANNO_SCRIPT_ARGS=()
+declare -A HOST_TO_CONTAINER_MOUNTS
 
-# Parse all arguments provided to this wrapper script
+# --- Pre-scan for --dataDir and --outputDir to establish base paths ---
+for i in "$@"; do
+    case $i in
+        --dataDir=*) HOST_DATA_PATH=$(realpath "${i#*=}");;
+        --dataDir) HOST_DATA_PATH=$(realpath "$2");;
+        --outputDir=*) HOST_OUTPUT_PATH=$(realpath "${i#*=}");;
+        --outputDir) HOST_OUTPUT_PATH=$(realpath "$2");;
+    esac
+done
+
+# --- Validation ---
+if [ -z "$HOST_DATA_PATH" ] || [ -z "$HOST_OUTPUT_PATH" ]; then
+    echo "Error: You must provide both --dataDir and --outputDir arguments."
+    echo "All external input files must be placed within the directory provided to --dataDir."
+    exit 1
+fi
+
+# Add the primary mounts
+HOST_TO_CONTAINER_MOUNTS["${HOST_DATA_PATH}"]="${CONTAINER_DATA_PATH}"
+HOST_TO_CONTAINER_MOUNTS["${HOST_OUTPUT_PATH}"]="${CONTAINER_OUTPUT_PATH}"
+# Add the script's own directory
+HOST_TO_CONTAINER_MOUNTS["$(pwd)"]="/smedanno"
+
+
+# --- Argument processing loop ---
+args_for_container=()
 while [[ "$#" -gt 0 ]]; do
-    case $1 in
-        --dataDir)
-            HOST_DATA_PATH=$(realpath "$2")
-            SMEDANNO_SCRIPT_ARGS+=("--dataDir" "${CONTAINER_DATA_PATH}")
-            shift 2
-            ;;
-        --outputDir)
-            HOST_OUTPUT_PATH=$(realpath "$2")
-            SMEDANNO_SCRIPT_ARGS+=("--outputDir" "${CONTAINER_OUTPUT_PATH}")
-            shift 2
-            ;;
-        --genomeRef)
-            # More robust genomeRef handling
-            GENOME_REF_HOST_PATH=$(realpath "$2")
-            HOST_GENOME_REF_DIR=$(dirname "${GENOME_REF_HOST_PATH}")
-            GENOME_REF_FILENAME=$(basename "${GENOME_REF_HOST_PATH}")
-            
-            # Pass the new container-side path to the main script
-            SMEDANNO_SCRIPT_ARGS+=("--genomeRef" "${CONTAINER_GENOME_DIR_PATH}/${GENOME_REF_FILENAME}")
-            shift 2
-            ;;
-        --all)
-            dataDir_is_required=true
-            SMEDANNO_SCRIPT_ARGS+=("$1")
-            shift
-            ;;
-        --steps)
-            steps_to_run="$2"
-            # Check if any of the specified steps require the data directory
-            if [[ ",${steps_to_run}," == *",0,"* || ",${steps_to_run}," == *",1,"* || ",${steps_to_run}," == *",2,"* ]]; then
-                dataDir_is_required=true
+    case "$1" in
+        # These flags take a path that needs to be translated
+        --genomeRef|--genomeGTF|--rrnaRef|--finalGTF|--alignDir|--SR_RB_gtf_dir|--SR_DN_gtf_dir|--MR_RB_gtf_dir|--MR_DN_gtf_dir|--genomeDir)
+            HOST_FILE_PATH=$(realpath "$2")
+            # Ensure the provided path is inside an already-mounted directory or needs a new one.
+            # For simplicity with this design, we enforce all inputs are in dataDir.
+            if [[ "${HOST_FILE_PATH}" != "${HOST_DATA_PATH}"* ]]; then
+                echo "Error: Input file/directory \"${HOST_FILE_PATH}\" for flag $1 must be located inside the --dataDir \"${HOST_DATA_PATH}\"."
+                exit 1
             fi
-            SMEDANNO_SCRIPT_ARGS+=("$1" "$2")
+            RELATIVE_PATH="${HOST_FILE_PATH#${HOST_DATA_PATH}}"
+            CONTAINER_FILE_PATH="${CONTAINER_DATA_PATH}${RELATIVE_PATH}"
+            
+            args_for_container+=("$1" "${CONTAINER_FILE_PATH}")
+            shift 2
+            ;;
+        # These are handled separately and already added
+        --dataDir|--outputDir)
+            args_for_container+=("$1" "/${1#--}") # adds --dataDir /data or --outputDir /output
             shift 2
             ;;
         *)
             # Pass all other arguments directly
-            SMEDANNO_SCRIPT_ARGS+=("$1")
+            args_for_container+=("$1")
             shift
             ;;
     esac
 done
 
-# --- Conditionally Validate Paths ---
-if [ -z "$HOST_OUTPUT_PATH" ]; then
-    echo "Error: You must provide the --outputDir argument."
-    exit 1
-fi
-
-if [[ "$dataDir_is_required" == true && -z "$HOST_DATA_PATH" ]]; then
-    echo "Error: --dataDir is required for the selected steps (e.g., 0, 1, 2, or --all)."
-    exit 1
-fi
-
-# If dataDir is not required and not provided, create a dummy directory for the mount
-if [ -z "$HOST_DATA_PATH" ]; then
-    echo "Creating dummy data directory for Docker mount..."
-    DUMMY_DATA_DIR=$(mktemp -d -p "$PWD" .smedanno_dummy_data_XXXXXX)
-    # Ensure the dummy directory is removed on script exit
-    trap 'echo "Cleaning up dummy data directory..."; rm -rf -- "$DUMMY_DATA_DIR"' EXIT
-    HOST_DATA_PATH=${DUMMY_DATA_DIR}
-fi
-
-# If a genome was provided, use its path. Otherwise, use a dummy path.
-if [ -z "$HOST_GENOME_REF_DIR" ]; then
-    HOST_GENOME_REF_DIR=${HOST_DATA_PATH} # Mount dummy dir if no genome is provided
-fi
-
 echo "Host Data Path Detected: ${HOST_DATA_PATH}"
 echo "Host Output Path Detected: ${HOST_OUTPUT_PATH}"
-echo "Host Genome Ref Path Detected: ${HOST_GENOME_REF_DIR}"
 
 # Dynamically create the .env file
 echo "Creating dynamic .env file..."
@@ -94,11 +75,17 @@ cat <<EOF > .env
 # This file is auto-generated by run_smedanno.sh
 DATA_PATH=${HOST_DATA_PATH}
 OUTPUT_PATH=${HOST_OUTPUT_PATH}
-GENOME_REF_DIR_PATH=${HOST_GENOME_REF_DIR}
 EOF
+
+# Build the volume arguments for docker-compose
+VOLUME_ARGS=""
+for host_path in "${!HOST_TO_CONTAINER_MOUNTS[@]}"; do
+    VOLUME_ARGS+=" -v ${host_path}:${HOST_TO_CONTAINER_MOUNTS[$host_path]}"
+done
 
 # Execute Docker Compose
 echo "Executing pipeline via docker-compose..."
-docker-compose run --rm smedanno "${SMEDANNO_SCRIPT_ARGS[@]}"
+# The -v flags on the command line will be added to the volumes in docker-compose.yml
+docker-compose run --rm ${VOLUME_ARGS} smedanno "${args_for_container[@]}"
 
 echo "Wrapper script finished."
