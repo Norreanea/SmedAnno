@@ -15,6 +15,7 @@ dependencies:
   - gffread=0.12.7
   - cutadapt
   - trim-galore
+  - filtlong
   - pfam_scan
   - r-base=4.2
   - r-dplyr
