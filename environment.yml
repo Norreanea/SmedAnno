@@ -22,6 +22,7 @@ dependencies:
   - r-data.table
   - r-stringr
   - r-tidyr
+  - r-readr
   - r-httr
   - r-jsonlite
   - r-purrr
