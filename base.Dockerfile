@@ -28,17 +28,14 @@ ENV PATH=/opt/conda/bin:$PATH
 COPY environment.yml /tmp/environment.yml
 
 # 4. Create the main conda environment.
-RUN conda install -n base -c conda-forge mamba -y && \
-    mamba env create -f /tmp/environment.yml && \
+RUN conda install -n base -c conda-forge --override-channels mamba -y && \
+    mamba env create --override-channels -f /tmp/environment.yml && \
     conda clean -afy
 
-# 5. Pre-build the smaller StringTie default environments 
-RUN conda create -y -n stringtie_short_211 -c bioconda "stringtie=2.1.1" && \
-    conda create -y -n stringtie_mix_221 -c bioconda "stringtie=2.2.1" && \
+# 5. Pre-build the smaller StringTie default environments
+RUN conda create -y -n stringtie_short_211 -c bioconda -c conda-forge --override-channels "stringtie=2.1.1" && \
+    conda create -y -n stringtie_mix_221 -c bioconda -c conda-forge --override-channels "stringtie=2.2.1" && \
     conda clean -afy
-
-# 6. Install any R packages not available in Conda into the main environment
-RUN conda run -n smedanno Rscript -e "install.packages('rhmmer', repos='https://cloud.r-project.org')"
 
 # Create a non-root user for improved security
 RUN groupadd --gid 1001 smedanno && \
