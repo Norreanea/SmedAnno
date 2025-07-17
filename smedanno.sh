@@ -6,19 +6,20 @@
 # Master script 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 
+	#set -x #Debugging mode
 	set -e  # Exit immediately if a command exits with a non-zero status
 	set -o pipefail  # Pipeline returns the exit status of the last command to fail
 	# set -x  # Enable debugging for troubleshooting
 
-	# Define a trap for cleaning up temporary files on exit
-	# The 'trap' command ensures that the cleanup_temp_files function is called when the script exits,
-	# for any reason (success, error, or user interrupt).
 	TEMP_FILES=()
 	cleanup_temp_files() {
-		echo_blue "Cleaning up temporary files..."
-		for file in "${TEMP_FILES[@]}"; do
-			rm -f -- "$file"
-		done
+		# Only run the cleanup logic if there are temporary files to remove
+		if [ ${#TEMP_FILES[@]} -gt 0 ]; then
+			echo_green "Cleaning up temporary files..."
+			for file in "${TEMP_FILES[@]}"; do
+				rm -rf -- "$file"
+			done
+		fi
 	}
 	trap cleanup_temp_files EXIT
 
@@ -34,6 +35,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	RED='\033[0;31m'
 	GREEN='\033[0;32m'
 	BLUE='\033[1;34m'
+	YELLOW='\033[1;33m'
 	NC='\033[0m' # No Color
 
 	# ---------------------------
@@ -42,34 +44,37 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	echo_red() {
 		echo -e "${RED}$1${NC}"
 	}
-
 	echo_green() {
 		echo -e "${GREEN}$1${NC}"
 	}
-
 	echo_blue() {
 		echo -e "${BLUE}$1${NC}"
 	}
+	echo_yellow() {
+    echo -e "${YELLOW}$1${NC}"
+}
 
 	# ---------------------------
 	# Function to display help
 	# ---------------------------
 	show_help() {
-		echo "Usage: SmedAnno [OPTIONS]"
+		echo "Usage: ./run_smedanno.sh [OPTIONS]"
 		echo ""
 		echo "General mandatory options (if applicable based on steps selected):"
 		echo "  --genomeRef PATH              Path to genome reference FASTA file"
-		echo "  --dataDir PATH                Path to input RNA-Seq data directory (must contain short_reads and/or mix_reads folders)"
-		echo ""
+		echo "  --dataDirShort PATH           Path to input directory with ONLY short-read FASTQ files."
+		echo "  --dataDirMix PATH             Path to input directory with mixed-read data (must contain 'short_reads' and 'long_reads' sub-folders)."
+	    echo ""
 		echo "Mandatory options for specific steps:"
 		echo "  --finalGTF PATH               Path to final GTF file (optional, required for Functional Annotation only)"
-		echo "  --alignDir PATH               Path to directory containing BAM files (optional, required for Gene and Transcript Assembly only)"
+		echo "  --alignDirShort PATH          Path to directory with ONLY short-read alignment BAM files (optional, required for Gene and Transcript Assembly only)."
+	    echo "  --alignDirMix PATH            Path to directory with mixed-read alignment BAM files (optional, required for Gene and Transcript Assembly only)."
 		echo "  --SR_RB_gtf_dir PATH          Directory containing SR_RB.gtf files (optional, required for Merging Assemblies)"
 		echo "  --SR_DN_gtf_dir PATH          Directory containing SR_DN.gtf files (optional, required for Merging Assemblies)"
 		echo "  --MR_RB_gtf_dir PATH          Directory containing MR_RB.gtf files (optional, required for Merging Assemblies)"
 		echo "  --MR_DN_gtf_dir PATH          Directory containing MR_DN.gtf files (optional, required for Merging Assemblies)"
 		echo ""
-		echo "Long-Read Trimming Options (Filtlong for Step 0):"
+		echo "Long-Read trimming Options (Filtlong for Step 0):"
 		echo "  --longread_min_len N          Minimum length for long reads (default: 1000)"
 		echo "  --longread_keep_percent N     Keep the best N percent of reads (default: 95)"
 		echo "  --longread_target_bases N     Target a total number of bases, keeping the best reads."
@@ -82,7 +87,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		echo "  --outputDir PATH              Path to output directory (default: ./outputDir)"
 		echo "  --threads N                   Number of CPU threads to use (default: 8)"
 		echo "  --Stringtie2minReadCoverage      Minimum read coverage allowed for the predicted transcripts (default: 1)"
-		echo "	--Stringtie2minIsoformAbundance  Minimum isoform abundance of the predicted transcripts (default: 0.01)"
+		echo "  --Stringtie2minIsoformAbundance  Minimum isoform abundance of the predicted transcripts (default: 0.01)"
 		echo "  --minOrfLength N              Minimum ORF length for TransDecoder (default: 100)"
 		echo "  --maxExonLength N             Maximum allowed exon length (default: 10000)"           
 		echo "  --maxTranscriptLength N       Maximum allowed transcript length (default: 100000)"      
@@ -104,7 +109,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		echo "  --geneticCodeNucl <code>      Genetic code for nuclear transcripts. Default: 'Universal'."
 		echo "  --geneticCodeMito <code>      Genetic code for mitochondrial transcripts. Default: 'Mitochondrial-Vertebrates'."
 		echo ""
-		echo_blue "Available genetic codes:"
+		echo_green "Available genetic codes:"
 		echo "  Acetabularia, Candida, Ciliate, Dasycladacean, Euplotid, Hexamita, Mesodinium,"
 		echo "  Mitochondrial-Ascidian, Mitochondrial-Chlorophycean, Mitochondrial-Echinoderm, "
 		echo "  Mitochondrial-Flatworm, Mitochondrial-Invertebrates,  Mitochondrial-Protozoan,"
@@ -137,11 +142,11 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		echo ""
 		echo "Examples:"
 		echo "  Run all steps:"
-		echo "    ./run_smedanno.sh --genomeRef /path/to/genome.fa --dataDir ./data --outputDir ./output --threads 4 --all"
+		echo "    ./run_smedanno.sh --genomeRef /path/to/genome.fa --dataDirShort ./data --outputDir ./output --threads 4 --all"
 		echo ""
 		echo "  Run Steps 8, 9, 10 only starting from a GTF file:"
 		echo "    ./run_smedanno.sh --finalGTF /path/to/your.gtf --genomeRef /path/to/genome.fa --outputDir ./output --steps 8,9,10"
-		exit 1
+		exit 0
 	}
 
 	# ---------------------------
@@ -209,7 +214,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	# Function to create conda environments and install tools
 	# ---------------------------
 	setup_conda_environments() {
-		echo_blue "Verifying and creating Conda environments as needed..."
+		echo_green "Verifying and creating Conda environments as needed..."
 
 		# Determine environment names based on specified versions
 		if [ "$STRINGTIE_SHORT_VERSION" = "$STRINGTIE_MIX_VERSION" ]; then
@@ -249,11 +254,13 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	# Function to create only necessary directories
 	# ---------------------------
 	setup_directories() {
-		echo_blue "Setting up required directories..."
+		echo_green "Setting up required directories..."
 
 		# Define all possible directory variables
 		GENOME_DIR="${OUTPUT_DIR}/genome"
 		PREPROC_DIR="${OUTPUT_DIR}/preprocessing"
+		ALIGN_DIR_SHORT_INTERNAL="${OUTPUT_DIR}/alignment/short"
+	    ALIGN_DIR_MIX_INTERNAL="${OUTPUT_DIR}/alignment/mix"
 		ALIGN_DIR_INTERNAL="${OUTPUT_DIR}/alignment" # Use internal variable to avoid conflict with user --alignDir
 		ASSEMBLY_DIR="${OUTPUT_DIR}/assembly"
 		SR_RB_GTF_DIR_INTERNAL="${ASSEMBLY_DIR}/SR_RB"
@@ -271,9 +278,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		# Map steps to the directories they require
 		declare -A DIRS_FOR_STEP
 		DIRS_FOR_STEP[0]="${PREPROC_DIR}"
-		DIRS_FOR_STEP[1]="${PREPROC_DIR} ${ALIGN_DIR_INTERNAL}"
-		DIRS_FOR_STEP[2]="${GENOME_DIR} ${ALIGN_DIR_INTERNAL}"
-		DIRS_FOR_STEP[3]="${ASSEMBLY_DIR} ${SR_RB_GTF_DIR_INTERNAL} ${SR_DN_GTF_DIR_INTERNAL} ${MR_RB_GTF_DIR_INTERNAL} ${MR_DN_GTF_DIR_INTERNAL}"
+		DIRS_FOR_STEP[1]="${PREPROC_DIR} ${ALIGN_DIR_SHORT_INTERNAL} ${ALIGN_DIR_MIX_INTERNAL}"
+	    DIRS_FOR_STEP[2]="${GENOME_DIR} ${ALIGN_DIR_SHORT_INTERNAL} ${ALIGN_DIR_MIX_INTERNAL}"
+	    DIRS_FOR_STEP[3]="${ASSEMBLY_DIR} ${SR_RB_GTF_DIR_INTERNAL} ${SR_DN_GTF_DIR_INTERNAL} ${MR_RB_GTF_DIR_INTERNAL} ${MR_DN_GTF_DIR_INTERNAL}"
 		DIRS_FOR_STEP[4]="${MERGE_DIR}"
 		DIRS_FOR_STEP[5]="${MERGE_DIR}"
 		DIRS_FOR_STEP[6]="${MERGE_DIR}"
@@ -325,7 +332,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	# Function to validate user-provided parameters
 	# ---------------------------
 	validate_parameters() {
-		echo_blue "Validating user-provided parameters..."
+		echo_green "Validating user-provided parameters..."
 		
         # Helper functions
 		is_positive_integer() {
@@ -394,33 +401,42 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 			echo_red "Please use one of the valid mitochondrial codes. See --help."
 			show_help
 		fi
-
+        # Validation of parameters with default values
 		is_positive_integer "${THREADS}" || { echo_red "Error: --threads must be a positive integer."; show_help; }
 		is_positive_integer "${MIN_ORF_LENGTH}" || { echo_red "Error: --minOrfLength must be a positive integer."; show_help; }
 		is_positive_integer "${MAX_EXON_LENGTH}" || { echo_red "Error: --maxExonLength must be a positive integer."; show_help; }
 		is_positive_integer "${MAX_TRANSCRIPT_LENGTH}" || { echo_red "Error: --maxTranscriptLength must be a positive integer."; show_help; }
 		is_positive_integer "${MAX_DISTANCE}" || { echo_red "Error: --maxDistance must be a positive integer."; show_help; }
 		is_positive_integer "${LARGE_INTRON_THRESHOLD}" || { echo_red "Error: --largeIntronThreshold must be a positive integer."; show_help; }
-		[[ "${LARGE_INTRON_THRESHOLD}" -gt 10000000 ]] && { echo_red "Warning: --largeIntronThreshold seems unusually high (>10,000,000). Please verify."; }
+		[[ "${LARGE_INTRON_THRESHOLD}" -gt 10000000 ]] && { echo_yellow "Warning: --largeIntronThreshold seems unusually high (>10,000,000). Please verify."; }
 		is_positive_integer "${PFAM_BITSCORE}" || { echo_red "Error: --pfamBitScore must be a positive integer."; show_help; }
 		is_positive_integer "${LONGREAD_MIN_LEN}" || { echo_red "Error: --longread_min_len must be a positive integer."; show_help; }
 		is_positive_integer "${LONGREAD_KEEP_PERCENT}" || { echo_red "Error: --longread_keep_percent must be a positive integer."; show_help; }
-		is_positive_integer "${LONGREAD_TARGET_BASES}" || { echo_red "Error: --longread_target_bases must be a positive integer."; show_help; }
-		
-		is_positive_integer "${TRIM_QUAL}" || { echo_red "Error: --trimQual must be a positive integer."; show_help; }
+		#is_positive_integer "${LONGREAD_TARGET_BASES}" || { echo_red "Error: --longread_target_bases must be a positive integer."; show_help; }
+		#is_positive_integer "${TRIM_QUAL}" || { echo_red "Error: --trimQual must be a positive integer."; show_help; }
 		[[ "${TRIM_QUAL}" -gt 40 ]] && { echo_red "Error: --trimQual should be within the Phred33 range (0-40)."; show_help; }
 		is_positive_integer "${TRIM_LEN}" || { echo_red "Error: --trimLen must be a positive integer."; show_help; }
-
 		is_positive_float "${BLAST_EVALUE}" || { echo_red "Error: --blastEvalue must be a positive number (e.g., 0.05 or 1e-5)."; show_help; }
 		is_positive_float "${PFAM_CEVALUE}" || { echo_red "Error: --pfamCEvalue must be a positive number."; show_help; }
 		is_positive_float "${INTERPRO_EVALUE}" || { echo_red "Error: --interproEvalue must be a positive number."; show_help; }
 		is_positive_float "${STRINGTIE2_COVERAGE}" || { echo_red "Error: --Stringtie2minReadCoverage must be a positive number."; show_help; }
 		is_positive_float "${STRINGTIE2_ABUNDANCE}" || { echo_red "Error: --Stringtie2minIsoformAbundance must be a positive number."; show_help; }
-
 		is_positive_integer "${BLAST_IDENTITY}" || { echo_red "Error: --blastIdentity must be a positive integer."; show_help; }
 		[[ "${BLAST_IDENTITY}" -lt 0 || "${BLAST_IDENTITY}" -gt 100 ]] && { echo_red "Error: --blastIdentity must be between 0 and 100."; show_help; }
 		is_positive_integer "${PFAM_COVERAGE}" || { echo_red "Error: --pfamCoverage must be a positive integer."; show_help; }
 		[[ "${PFAM_COVERAGE}" -lt 0 || "${PFAM_COVERAGE}" -gt 100 ]] && { echo_red "Error: --pfamCoverage must be between 0 and 100."; show_help; }
+		
+		# Conditionally validate optional parameters that have no default value
+		if [ -n "${LONGREAD_TARGET_BASES}" ]; then
+			is_positive_integer "${LONGREAD_TARGET_BASES}" || { echo_red "Error: --longread_target_bases must be a positive integer."; show_help; }
+		fi
+		if [ -n "${TRIM_ADAPTER}" ]; then
+			# Basic check if adapter sequence looks reasonable (e.g., contains only A,C,G,T,N)
+			if [[ "${TRIM_ADAPTER}" =~ [^ACGTN] ]]; then
+				echo_red "Error: --trimAdapter sequence contains invalid characters."
+				show_help
+			fi
+		fi
 
 		echo_green "All parameters validated successfully."
 	}
@@ -616,28 +632,28 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		# Process short-only samples
 		if [ "${#SHORT_ONLY_SAMPLES[@]}" -gt 0 ]; then
 			for SAMPLE in "${SHORT_ONLY_SAMPLES[@]}"; do
-				echo_green  "Aligning Short-Only Sample: \"${SAMPLE}\""
+				echo_green  "Aligning short-only sample: \"${SAMPLE}\""
 				local READ1; READ1=$([ -n "${RRNA_REF}" ] && echo "${PREPROC_DIR}/${SAMPLE}_non_rrna_R1.fq.gz" || find_read_file "${SHORT_ONLY_DIR}" "${SAMPLE}" "1")
 				local READ2; READ2=$([ -n "${RRNA_REF}" ] && echo "${PREPROC_DIR}/${SAMPLE}_non_rrna_R2.fq.gz" || find_read_file "${SHORT_ONLY_DIR}" "${SAMPLE}" "2")
 				[ -z "${READ1}" ] || [ -z "${READ2}" ] && { echo_red  "Error: Read files for sample \"${SAMPLE}\" not found."; exit 1; }
 				local READ_FILES_CMD; READ_FILES_CMD=$([ "$(is_gzipped "${READ1}")" == "yes" ] && echo "zcat" || echo "cat")
 
-				echo_green  "Running STAR aligner for Short-Only Sample: \"${SAMPLE}\""
+				echo_green  "Running STAR aligner for short-only sample: \"${SAMPLE}\""
 				STAR --runThreadN "${THREADS}" \
 					 --genomeDir "${GENOME_DIR}" \
 					 --readFilesIn "${READ1}" "${READ2}" \
 					 --readFilesCommand "${READ_FILES_CMD}" \
 					 --outSAMtype BAM SortedByCoordinate \
-					 --outFileNamePrefix "${ALIGN_DIR_INTERNAL}/${SAMPLE}_STAR_" \
+					 --outFileNamePrefix "${ALIGN_DIR_SHORT_INTERNAL}/${SAMPLE}_STAR_" \
 					 --outTmpDir /tmp/temp_star/temp
 
-				local ALIGNED_SORTED_BAM="${ALIGN_DIR_INTERNAL}/${SAMPLE}_STAR_Aligned.sortedByCoord.out.bam"
+				local ALIGNED_SORTED_BAM="${ALIGN_DIR_SHORT_INTERNAL}/${SAMPLE}_STAR_Aligned.sortedByCoord.out.bam"
 				[ ! -f "${ALIGNED_SORTED_BAM}" ] && { echo_red "Error: STAR did not produce the expected sorted BAM file for sample \"${SAMPLE}\"."; exit 1; }
 
-				echo_green  "Adding XS attribute to BAM file for Sample: \"${SAMPLE}\""
+				echo_green  "Adding XS attribute to BAM file for sample: \"${SAMPLE}\""
 				samtools view -h "${ALIGNED_SORTED_BAM}" | \
 					gawk -v strType=2 -f ./tagXSstrandedData.awk | \
-					samtools view -bSq 10 -F 4 - > "${ALIGN_DIR_INTERNAL}/${SAMPLE}_STAR_Aligned.sortedByCoord.outXS.bam"
+					samtools view -bSq 10 -F 4 - > "${ALIGN_DIR_SHORT_INTERNAL}/${SAMPLE}_STAR_Aligned.sortedByCoord.outXS.bam"
 				rm "${ALIGNED_SORTED_BAM}"
 			done
 		fi
@@ -651,30 +667,30 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 				[ -z "${MIX_READ1}" ] || [ -z "${MIX_READ2}" ] && { echo_red "Error: Short read files for mixed sample \"${SAMPLE}\" not found."; exit 1; }
 				local MIX_READ_FILES_CMD; MIX_READ_FILES_CMD=$([ "$(is_gzipped "${MIX_READ1}")" == "yes" ] && echo "zcat" || echo "cat")
 
-				echo_green  "Running STAR aligner for Mixed Sample: \"${SAMPLE}\" (Short Reads)"
+				echo_green  "Running STAR aligner for mixed sample: \"${SAMPLE}\" (Short Reads)"
 				STAR --runThreadN "${THREADS}" \
 					 --genomeDir "${GENOME_DIR}" \
 					 --readFilesIn "${MIX_READ1}" "${MIX_READ2}" \
 					 --readFilesCommand "${MIX_READ_FILES_CMD}" \
 					 --outFilterType BySJout --outFilterMultimapNmax 1 --outFilterMismatchNmax 0 \
 					 --outSAMtype BAM SortedByCoordinate \
-					 --outFileNamePrefix "${ALIGN_DIR_INTERNAL}/${SAMPLE}_STAR_" \
+					 --outFileNamePrefix "${ALIGN_DIR_MIX_INTERNAL}/${SAMPLE}_STAR_" \
 					 --outTmpDir /tmp/temp_star/temp
 				
-				local ALIGNED_SHORT_SORTED_BAM="${ALIGN_DIR_INTERNAL}/${SAMPLE}_STAR_Aligned.sortedByCoord.out.bam"
+				local ALIGNED_SHORT_SORTED_BAM="${ALIGN_DIR_MIX_INTERNAL}/${SAMPLE}_STAR_Aligned.sortedByCoord.out.bam"
 				[ ! -f "${ALIGNED_SHORT_SORTED_BAM}" ] && { echo_red "Error: STAR did not produce the expected sorted BAM file for mixed sample \"${SAMPLE}\"."; exit 1; }
 
 				echo_green  "Adding XS attribute to short BAM file for Sample: \"${SAMPLE}\""
-				samtools view -h "${ALIGNED_SHORT_SORTED_BAM}" | gawk -v strType=2 -f ./tagXSstrandedData.awk | samtools view -bSq 10 -F 4 - > "${ALIGN_DIR_INTERNAL}/${SAMPLE}_STAR_Aligned.sortedByCoord.outXS.bam"
+				samtools view -h "${ALIGNED_SHORT_SORTED_BAM}" | gawk -v strType=2 -f ./tagXSstrandedData.awk | samtools view -bSq 10 -F 4 - > "${ALIGN_DIR_MIX_INTERNAL}/${SAMPLE}_STAR_Aligned.sortedByCoord.outXS.bam"
 				rm "${ALIGNED_SHORT_SORTED_BAM}"
 				
 				local MIX_LONG_READ; MIX_LONG_READ=$([ -n "${RRNA_REF}" ] && echo "${PREPROC_DIR}/${SAMPLE}_non_rrna_long_reads.fq.gz" || find_read_file "${MIX_LONG_DIR}" "${SAMPLE}" "_long_reads")
 				if [ -n "${MIX_LONG_READ}" ] && [ -f "${MIX_LONG_READ}" ]; then
-					echo_green  "Running minimap2 aligner for Mixed Sample: \"${SAMPLE}\" (Long Reads)"
-					local ALIGNED_LONG_BAM="${ALIGN_DIR_INTERNAL}/${SAMPLE}_long_aligned.bam"
+					echo_green  "Running minimap2 aligner for mixed sample: \"${SAMPLE}\" (Long Reads)"
+					local ALIGNED_LONG_BAM="${ALIGN_DIR_MIX_INTERNAL}/${SAMPLE}_long_aligned.bam"
 					minimap2 -t "${THREADS}" -ax splice "${GENOME_REF}" "${MIX_LONG_READ}" | samtools sort -@ "${THREADS}" -o "${ALIGNED_LONG_BAM}" -
 				else
-					echo_green  "No long reads found or file does not exist for Mixed Sample: \"${SAMPLE}\""
+					echo_green  "No long reads found or file does not exist for mixed sample: \"${SAMPLE}\""
 				fi
 			done
 		fi
@@ -687,21 +703,22 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	step3_gene_transcript_assembly() {
 		echo_blue  "Starting Step 3: Gene and Transcript Assembly"
 
-		# Use the user-provided alignDir if available, otherwise use the internal one
-		local current_align_dir=${ALIGN_DIR:-$ALIGN_DIR_INTERNAL}
+		# Use the user-provided alignDirs if available, otherwise use the internal ones
+		local current_align_dir_short=${ALIGN_DIR_SHORT:-$ALIGN_DIR_SHORT_INTERNAL}
+		local current_align_dir_mix=${ALIGN_DIR_MIX:-$ALIGN_DIR_MIX_INTERNAL}
 		
 		# Process short-only samples
 		if [ "${#SHORT_ONLY_SAMPLES[@]}" -gt 0 ]; then
 			for SAMPLE in "${SHORT_ONLY_SAMPLES[@]}"; do
-				echo_green  "Assembling transcripts for Short-Only Sample: \"${SAMPLE}\""
-				local ALIGNED_SORTED_BAM="${current_align_dir}/${SAMPLE}_STAR_Aligned.sortedByCoord.outXS.bam"
-				
+				echo_green  "Assembling transcripts for short-only sample: \"${SAMPLE}\""
+				local ALIGNED_SORTED_BAM="${current_align_dir_short}/${SAMPLE}_STAR_Aligned.sortedByCoord.outXS.bam"
+			    [ ! -f "${ALIGNED_SORTED_BAM}" ] && { echo_red "BAM file not found for sample ${SAMPLE} in ${current_align_dir_short}. Skipping."; continue; }
 				if [ -n "${GENOME_GTF}" ]; then
-					echo_green  "Running StringTie2 for Reference-Based Assembly (RB, SR)"
+					echo_green  "Running StringTie2 for reference-based assembly (RB, SR)"
 					conda run -n ${ENV_SHORT} stringtie -p "${THREADS}" -G "${GENOME_GTF}" -c "${STRINGTIE2_COVERAGE}" -f "${STRINGTIE2_ABUNDANCE}" -o "${SR_RB_GTF_DIR_INTERNAL}/${SAMPLE}_SR_RB.gtf" "${ALIGNED_SORTED_BAM}"
 				fi
 
-				echo_green  "Running StringTie2 for De Novo Assembly (DN, SR)"
+				echo_green  "Running StringTie2 for de novo assembly (DN, SR)"
 				conda run -n ${ENV_SHORT} stringtie -p "${THREADS}" -c "${STRINGTIE2_COVERAGE}" -f "${STRINGTIE2_ABUNDANCE}" -o "${SR_DN_GTF_DIR_INTERNAL}/${SAMPLE}_SR_DN.gtf" "${ALIGNED_SORTED_BAM}"
 			done
 		fi
@@ -709,17 +726,17 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		# Process mixed samples
 		if [ "${#MIX_SAMPLES[@]}" -gt 0 ]; then
 			for SAMPLE in "${MIX_SAMPLES[@]}"; do
-				echo_green  "Assembling transcripts for Mixed Sample: \"${SAMPLE}\""
-				local ALIGNED_SHORT_SORTED_BAM="${current_align_dir}/${SAMPLE}_STAR_Aligned.sortedByCoord.outXS.bam"
-				local ALIGNED_LONG_BAM="${current_align_dir}/${SAMPLE}_long_aligned.bam"
-				[ ! -f "${ALIGNED_LONG_BAM}" ] && { echo_red "No aligned long reads BAM found for Sample: \"${SAMPLE}\", skipping mixed assembly."; continue; }
-
+				echo_green  "Assembling transcripts for mixed sample: \"${SAMPLE}\""
+				local ALIGNED_SHORT_SORTED_BAM="${current_align_dir_mix}/${SAMPLE}_STAR_Aligned.sortedByCoord.outXS.bam"
+				local ALIGNED_LONG_BAM="${current_align_dir_mix}/${SAMPLE}_long_aligned.bam"
+			    [ ! -f "${ALIGNED_SHORT_SORTED_BAM}" ] && { echo_red "Short-read BAM not found for mixed sample ${SAMPLE}. Skipping mixed assembly."; continue; }
+			    [ ! -f "${ALIGNED_LONG_BAM}" ] && { echo_red "Long-read BAM not found for mixed sample ${SAMPLE}. Skipping mixed assembly."; continue; }
 				if [ -n "${GENOME_GTF}" ]; then
-					echo_green  "Running StringTie2 for Reference-Based Assembly (RB, MR)"
+					echo_green  "Running StringTie2 for reference-based assembly (RB, MR)" 
 					conda run -n ${ENV_MIX} stringtie --mix -p "${THREADS}" -G "${GENOME_GTF}" -c "${STRINGTIE2_COVERAGE}" -f "${STRINGTIE2_ABUNDANCE}" -o "${MR_RB_GTF_DIR_INTERNAL}/${SAMPLE}_MR_RB.gtf" "${ALIGNED_SHORT_SORTED_BAM}" "${ALIGNED_LONG_BAM}"
 				fi
 
-				echo_green  "Running StringTie2 for De Novo Assembly (DN, MR)"
+				echo_green  "Running StringTie2 for de novo assembly (DN, MR)"
 				conda run -n ${ENV_MIX} stringtie --mix -p "${THREADS}" -c "${STRINGTIE2_COVERAGE}" -f "${STRINGTIE2_ABUNDANCE}" -o "${MR_DN_GTF_DIR_INTERNAL}/${SAMPLE}_MR_DN.gtf" "${ALIGNED_SHORT_SORTED_BAM}" "${ALIGNED_LONG_BAM}"
 			done
 		fi
@@ -890,10 +907,10 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	# Step 9: Functional Annotation and Filtering
 	# ---------------------------
 	step9_functional_annotation() {
-		echo_blue  "Starting Step 9: Functional Annotation and Filtering"
+		echo_blue "Starting Step 9: Functional Annotation and Filtering"
 		
 		local ANNOTATED_GTF=$([ -n "${finalGTF}" ] && echo "${finalGTF}" || echo "${ANNOTATION_DIR}/corrected_with_introns.gtf")
-		[ ! -f "${ANNOTATED_GTF}" ] && { echo_red "No valid GTF file found for functional annotation. Skipping Step 9."; return; }
+		[ ! -f "${ANNOTATED_GTF}" ] && { echo_red "No valid GTF file found for functional annotation. Skipping Step 9."; return 1; }
 		echo_green "Using GTF file for annotation: \"${ANNOTATED_GTF}\""
 
 		local SANITIZED_GTF="${ANNOTATION_DIR}/sanitized.final.gtf"
@@ -909,11 +926,10 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		if [[ "$has_nucl" == true && "$has_mito" == true ]]; then GENOME_TYPE_DETECTED="mixed"
 		elif [[ "$has_nucl" == true ]]; then GENOME_TYPE_DETECTED="nuclear"
 		elif [[ "$has_mito" == true ]]; then GENOME_TYPE_DETECTED="mito"
-		else GENOME_TYPE_DETECTED="nuclear"; echo_red "Warning: Could not classify contigs. Defaulting to 'nuclear'."
+		else GENOME_TYPE_DETECTED="nuclear"; echo_yellow "Warning: Could not classify contigs. Defaulting to 'nuclear'."
 		fi
-		# Override auto-detection if user specified the type
 		[ -n "${GENOME_TYPE_USER}" ] && GENOME_TYPE="${GENOME_TYPE_USER}" || GENOME_TYPE="${GENOME_TYPE_DETECTED}"
-		echo_blue "Genome type set to: \"${GENOME_TYPE}\""
+		echo_green "Genome type set to: \"${GENOME_TYPE}\""
 
 		local NUCL_TRANSCRIPTS_FA="${FUNCTIONAL_DIR}/nuclear_transcripts.fa"
 		local MITO_TRANSCRIPTS_FA="${FUNCTIONAL_DIR}/mito_transcripts.fa"
@@ -936,28 +952,65 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 			echo_green "Creating mitochondrial-only transcript FASTA file..."
 			gffread -w "${MITO_TRANSCRIPTS_FA}" -g "${GENOME_REF}" "${SANITIZED_GTF}"
 		fi
-
 		run_transdecoder() {
-			local input_fasta="$1"; local genetic_code="$2"; local output_prefix="$3"
-			local work_dir="${FUNCTIONAL_DIR}/${output_prefix}_transdecoder_work"
-			local genetic_code_cap=${genetic_code^} # Capitalize first letter
-			echo_green "Running TransDecoder for '${output_prefix}' with genetic code '${genetic_code_cap}'..."
-			mkdir -p "${work_dir}"
-			TransDecoder.LongOrfs -t "${input_fasta}" --genetic_code "${genetic_code_cap}" -O "${work_dir}"
-			TransDecoder.Predict -t "${input_fasta}" --genetic_code "${genetic_code_cap}" --single_best_only -O "${work_dir}"
-		}
+				local input_fasta="$1"; local genetic_code="$2"; local output_prefix="$3"
+				# Checkpoint: skip if final output already exists
+				local final_pep_file="${FUNCTIONAL_DIR}/$(basename "${input_fasta}").transdecoder.pep"
+				if [ -s "${final_pep_file}" ]; then
+					echo_yellow "Skipping TransDecoder for $(basename "${input_fasta}"), final output exists."
+					return 0
+				fi
+				local genetic_code_cap=${genetic_code^}
+				echo_green "Running TransDecoder for '${output_prefix}' with genetic code '${genetic_code_cap}'..."
+				pushd "${FUNCTIONAL_DIR}" > /dev/null
+				# Use the relative basename of the fasta file, as we are now in its directory
+				local fasta_basename
+				fasta_basename=$(basename "${input_fasta}")
+
+				# Run LongOrfs using the relative filename
+				TransDecoder.LongOrfs -t "${fasta_basename}" --genetic_code "${genetic_code_cap}"
+
+				# Run Predict using the relative filename
+				TransDecoder.Predict -t "${fasta_basename}" --genetic_code "${genetic_code_cap}" --single_best_only
+				popd > /dev/null
+			    }
 
 		if [[ "$GENOME_TYPE" == "nuclear" || "$GENOME_TYPE" == "mixed" ]]; then
-			[ -s "${NUCL_TRANSCRIPTS_FA}" ] && run_transdecoder "${NUCL_TRANSCRIPTS_FA}" "${GENETIC_CODE_NUCL}" "nuclear"
+		    if [ -s "${NUCL_TRANSCRIPTS_FA}" ]; then 
+			   run_transdecoder "${NUCL_TRANSCRIPTS_FA}" "${GENETIC_CODE_NUCL}" "nuclear"
+			else
+			   echo_yellow "Skipping TransDecoder, output exists." 
+			fi
 		fi
 		if [[ "$GENOME_TYPE" == "mito" || "$GENOME_TYPE" == "mixed" ]]; then
-			[ -s "${MITO_TRANSCRIPTS_FA}" ] && run_transdecoder "${MITO_TRANSCRIPTS_FA}" "${GENETIC_CODE_MITO}" "mito"
+			if [ -s "${MITO_TRANSCRIPTS_FA}" ]; then 
+		       run_transdecoder "${MITO_TRANSCRIPTS_FA}" "${GENETIC_CODE_MITO}" "mito"
+			else
+			   echo_yellow "Skipping TransDecoder, output exists." 
+			fi
+		fi
+		
+		# Merge TransDecoder structural annotations back into the main GTF 
+		local GTF_FOR_HOMOLOGY="${FUNCTIONAL_DIR}/annotation_with_CDS.gtf"
+		local TD_NUCL_GFF3="${FUNCTIONAL_DIR}/nuclear_transcripts.fa.transdecoder.gff3"
+		local TD_MITO_GFF3="${FUNCTIONAL_DIR}/mito_transcripts.fa.transdecoder.gff3"
+
+		if [ -s "${TD_NUCL_GFF3}" ] || [ -s "${TD_MITO_GFF3}" ]; then
+			echo_green "Merging TransDecoder CDS/UTR predictions into the main annotation..."
+			# Use AGAT to merge. It will add CDS, UTRs, and stop codons.
+			agat_sp_merge_annotations.pl -g "${SANITIZED_GTF}" -f "${TD_NUCL_GFF3}" "${TD_MITO_GFF3}" -o "${GTF_FOR_HOMOLOGY}"
+			[ -f ./*.agat.log ] && mv ./*.agat.log "${LOGS_DIR}/"
+		else
+			echo_yellow "No TransDecoder GFF3 found. Using original GTF for homology search."
+			cp "${SANITIZED_GTF}" "${GTF_FOR_HOMOLOGY}"
 		fi
 		
 		# Consolidate peptide predictions
-		cat "${FUNCTIONAL_DIR}"/*/transcripts.fa.transdecoder.pep 2>/dev/null > "${LONGEST_ORFS_PEP}"
+		cat "${FUNCTIONAL_DIR}"/*.transdecoder.pep 2>/dev/null > "${LONGEST_ORFS_PEP}"
 		local LONGEST_ORFS_PEP_CLEAN="${FUNCTIONAL_DIR}/longest_orfs.pep.clean"
 		sed 's/\*//g' "${LONGEST_ORFS_PEP}" > "${LONGEST_ORFS_PEP_CLEAN}"
+		# Create a list of transcripts with ORFs
+		grep ">" "${LONGEST_ORFS_PEP_CLEAN}" | sed 's/>//' > "${FUNCTIONAL_DIR}/transcripts_with_orfs.txt"
 
 		# Download databases if needed
 		if [ -z "${BLAST_DB_SwissProt}" ]; then
@@ -965,33 +1018,73 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 			if [ ! -f "${BLAST_DB_SwissProt}.pin" ]; then
 				echo_green  "SwissProt database not found. Downloading..."
 				mkdir -p "${FUNCTIONAL_DIR}/blast_dbs"
-				wget -qO - "https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/uniprot_sprot.fasta.gz" | gunzip -c > "${FUNCTIONAL_DIR}/blast_dbs/swissprot.fasta"
+				if ! wget -T 15 -qO - "https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/uniprot_sprot.fasta.gz" | gunzip -c > "${FUNCTIONAL_DIR}/blast_dbs/swissprot.fasta"; then
+					echo_red "Error: Failed to download SwissProt database. Check network connection or disk space."
+					exit 1
+				fi
 				makeblastdb -in "${FUNCTIONAL_DIR}/blast_dbs/swissprot.fasta" -dbtype prot -out "${BLAST_DB_SwissProt}"
 			fi
 		fi
 
 		if [ -z "${PFAM_DB}" ]; then
-			PFAM_DB="${FUNCTIONAL_DIR}/pfam_db"
-			if [ ! -f "${PFAM_DB}/Pfam-A.hmm.h3m" ]; then
-				echo_green  "Pfam database not found. Downloading..."
-				mkdir -p "${PFAM_DB}"
-				wget -qO - "https://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.hmm.gz" | gunzip -c > "${PFAM_DB}/Pfam-A.hmm"
-				hmmpress "${PFAM_DB}/Pfam-A.hmm"
+			local PFAM_DB_PATH="${PFAM_DB:-${FUNCTIONAL_DIR}/pfam_db}"
+			if [ ! -f "${PFAM_DB_PATH}/Pfam-A.hmm.h3m" ]; then
+				echo_green "Pfam database not found. Downloading..."
+				mkdir -p "${PFAM_DB_PATH}"
+				wget -T 15 -qO - "https://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.hmm.gz" | gunzip -c > "${PFAM_DB_PATH}/Pfam-A.hmm" || { echo_red "Pfam download failed."; exit 1; }
+				hmmpress "${PFAM_DB_PATH}/Pfam-A.hmm"
+			else
+				echo_green "Pfam database found. Skipping download."
 			fi
 		fi
 
 		# Run homology searches if requested and peptides were predicted
 		if [ -s "${LONGEST_ORFS_PEP_CLEAN}" ]; then
-			[[ "${FUNCTIONAL_METHODS}" == *"BLASTp"* ]] && echo_green "Running BLASTp..." && blastp -query "${LONGEST_ORFS_PEP_CLEAN}" -db "${BLAST_DB_SwissProt}" -outfmt 6 -num_threads "${THREADS}" -out "${FUNCTIONAL_DIR}/blastp_results.out"
-			[[ "${FUNCTIONAL_METHODS}" == *"PFAM"* ]] && echo_green "Running PFAM Scan..." && hmmscan --cpu "${THREADS}" --domtblout "${FUNCTIONAL_DIR}/pfam_results.out" "${PFAM_DB}/Pfam-A.hmm" "${LONGEST_ORFS_PEP_CLEAN}"
-			[[ "${FUNCTIONAL_METHODS}" == *"INTERPRO"* ]] && echo_green "Running InterProScan..." && run_interproscan "${LONGEST_ORFS_PEP_CLEAN}" "${FUNCTIONAL_DIR}/interpro.tsv" "${THREADS}"
+			echo_green "Found $(grep -c '^>' ${LONGEST_ORFS_PEP_CLEAN}) predicted proteins for analysis."
+			if [[ "$FUNCTIONAL_METHODS" == *"BLASTp"* ]]; then
+				if [ -s "${FUNCTIONAL_DIR}/blastp_results.out" ]; then 
+				   echo_yellow "Skipping BLASTp, output exists." 
+				else
+				   echo_green "Running BLASTp..." 
+				   blastp -query "${LONGEST_ORFS_PEP_CLEAN}" -db "${BLAST_DB_SwissProt}" -outfmt 6 -num_threads "${THREADS}" -out "${FUNCTIONAL_DIR}/blastp_results.out"
+				fi
+			fi
+			if [[ "$FUNCTIONAL_METHODS" == *"PFAM"* ]]; then
+				if [ -s "${FUNCTIONAL_DIR}/pfam_results.out" ]; then 
+				    echo_yellow "Skipping PFAM Scan, output exists." 
+				else
+					echo_green "Running PFAM Scan..." 
+					hmmscan --cpu "${THREADS}" --domtblout "${FUNCTIONAL_DIR}/pfam_results.out" "${PFAM_DB_PATH}/Pfam-A.hmm" "${LONGEST_ORFS_PEP_CLEAN}"
+				fi
+			fi
+			if [[ "$FUNCTIONAL_METHODS" == *"INTERPRO"* ]]; then
+				if [ -s "${FUNCTIONAL_DIR}/interpro.tsv" ]; then 
+				   echo_yellow "Skipping InterProScan, output exists." 
+				else   
+				   echo_green "Running InterProScan..." 
+				   run_interproscan "${LONGEST_ORFS_PEP_CLEAN}" "${FUNCTIONAL_DIR}/interpro.tsv" "${THREADS}"
+				fi
+			fi
+		else
+			echo_yellow "Warning: No proteins predicted. Skipping BLASTp, Pfam, InterProScan."
 		fi
 		
 		local ALL_TRANSCRIPTS_FA="${FUNCTIONAL_DIR}/all_transcripts.fa"
-		cat "${NUCL_TRANSCRIPTS_FA}" "${MITO_TRANSCRIPTS_FA}" 2>/dev/null > "${ALL_TRANSCRIPTS_FA}"
+		# Append each source file only if it exists
+		[ -f "${NUCL_TRANSCRIPTS_FA}" ] && cat "${NUCL_TRANSCRIPTS_FA}" >> "${ALL_TRANSCRIPTS_FA}"
+		[ -f "${MITO_TRANSCRIPTS_FA}" ] && cat "${MITO_TRANSCRIPTS_FA}" >> "${ALL_TRANSCRIPTS_FA}"
+		#cat "${NUCL_TRANSCRIPTS_FA}" "${MITO_TRANSCRIPTS_FA}" 2>/dev/null > "${ALL_TRANSCRIPTS_FA}"
 		if [ -s "${ALL_TRANSCRIPTS_FA}" ]; then
-			[[ "${FUNCTIONAL_METHODS}" == *"BLASTx"* ]] && echo_green "Running BLASTx..." && blastx -query "${ALL_TRANSCRIPTS_FA}" -db "${BLAST_DB_SwissProt}" -outfmt 6 -num_threads "${THREADS}" -out "${FUNCTIONAL_DIR}/blastx_results.out"
+			if [[ "${FUNCTIONAL_METHODS}" == *"BLASTx"* ]]; then
+				if [ -s "${FUNCTIONAL_DIR}/blastx_results.out" ]; then 
+				   echo_yellow "Skipping BLASTx, output exists." 
+				else
+				   echo_green "Running BLASTx..." && blastx -query "${ALL_TRANSCRIPTS_FA}" -db "${BLAST_DB_SwissProt}" -outfmt 6 -num_threads "${THREADS}" -out "${FUNCTIONAL_DIR}/blastx_results.out"
+				fi
+			fi
 		fi
+		
+
 		echo_blue  "Step 9 Completed: Functional Annotation"
 	}
 
@@ -1065,6 +1158,10 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	LONGREAD_KEEP_PERCENT=95
 	RUN_ALL=false
 	STEPS=()
+	DATA_DIR_SHORT=""
+	DATA_DIR_MIX=""
+	ALIGN_DIR_SHORT=""
+	ALIGN_DIR_MIX=""
 	
 	# Use a standard while/case loop for argument parsing
 	while [[ "$#" -gt 0 ]]; do
@@ -1073,7 +1170,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 			--rrnaRef) RRNA_REF="$2"; shift 2 ;;
 			--genomeRef) GENOME_REF="$2"; shift 2 ;;
 			--genomeGTF) GENOME_GTF="$2"; shift 2 ;;
-			--alignDir) ALIGN_DIR="$2"; shift 2 ;;
+			--alignDirShort) ALIGN_DIR_SHORT="$2"; shift 2 ;;
+			--alignDirMix) ALIGN_DIR_MIX="$2"; shift 2 ;;
 			--finalGTF) finalGTF="$2"; shift 2 ;;
 			--SR_RB_gtf_dir) SR_RB_GTF_DIR="$2"; shift 2 ;;
 			--SR_DN_gtf_dir) SR_DN_GTF_DIR="$2"; shift 2 ;;
@@ -1085,7 +1183,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 			--mitoPattern) MITO_PATTERN="$2"; shift 2;;
 			--geneticCodeNucl) GENETIC_CODE_NUCL="$2"; shift 2;;
 			--geneticCodeMito) GENETIC_CODE_MITO="$2"; shift 2;;
-			--dataDir) DATA_DIR="$2"; shift 2 ;;
+			--dataDirShort) DATA_DIR_SHORT="$2"; shift 2 ;;
+			--dataDirMix) DATA_DIR_MIX="$2"; shift 2 ;;
 			--outputDir) OUTPUT_DIR="$2"; shift 2 ;;
 			--threads) THREADS="$2"; shift 2 ;;
 			--Stringtie2minReadCoverage) STRINGTIE2_COVERAGE="$2"; shift 2 ;;
@@ -1141,28 +1240,44 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	echo_green "Pipeline output will be written to host directory: \"${OUTPUT_PATH}\""
 
 	# ---------------------------
-	# Setup and Pre-flight Checks
+	# Setup and pre-flight checks
 	# ---------------------------
 	validate_parameters
 	check_dependencies
 	setup_directories
 	setup_conda_environments
 	
-	# Define Sample Names
-	SHORT_ONLY_DIR="${DATA_DIR}/short_reads"
+	# ---------------------------
+	# Define sample Names
+	# ---------------------------
 	SHORT_ONLY_SAMPLES=()
-	if [ -d "${SHORT_ONLY_DIR}" ]; then
-		mapfile -t SHORT_ONLY_SAMPLES < <(find "${SHORT_ONLY_DIR}" -maxdepth 1 -type f \( -name "*1.f*q*" -o -name "*2.f*q*" \) -printf "%f\n" | sed -E 's/(_R)?[12]\..*//;s/(_)[12]\..*//' | sort | uniq)
-	fi
-	MIX_DIR="${DATA_DIR}/mix_reads"; MIX_SHORT_DIR="${MIX_DIR}/short_reads"; MIX_LONG_DIR="${MIX_DIR}/long_reads"
 	MIX_SAMPLES=()
-	if [ -d "${MIX_SHORT_DIR}" ]; then
-		mapfile -t MIX_SAMPLES < <(find "${MIX_SHORT_DIR}" -maxdepth 1 -type f \( -name "*1.f*q*" -o -name "*2.f*q*" \) -printf "%f\n" | sed -E 's/(_R)?[12]\..*//;s/(_)[12]\..*//' | sort | uniq)
-	fi
-	[ "${#SHORT_ONLY_SAMPLES[@]}" -gt 0 ] && echo_green "Short-read-only Samples detected: ${SHORT_ONLY_SAMPLES[*]}"
-	[ "${#MIX_SAMPLES[@]}" -gt 0 ] && echo_green "Mixed-read Samples detected: ${MIX_SAMPLES[*]}"
 
+	# Discover samples from FASTQ data directories if provided
+	if [ -n "${DATA_DIR_SHORT}" ]; then
+		mapfile -t SHORT_ONLY_SAMPLES < <(find "${DATA_DIR_SHORT}" -maxdepth 1 -type f \( -name "*1.f*q*" -o -name "*2.f*q*" \) -printf "%f\n" | sed -E 's/(_R)?[12]\..*//;s/(_)[12]\..*//' | sort | uniq)
+	fi
+	if [ -n "${DATA_DIR_MIX}" ]; then
+		mapfile -t MIX_SAMPLES < <(find "${DATA_DIR_MIX}/short_reads" -maxdepth 1 -type f \( -name "*1.f*q*" -o -name "*2.f*q*" \) -printf "%f\n" | sed -E 's/(_R)?[12]\..*//;s/(_)[12]\..*//' | sort | uniq)
+	fi
+
+	# If no samples found from FASTQ, discover from pre-aligned BAM directories
+	if [ ${#SHORT_ONLY_SAMPLES[@]} -eq 0 ] && [ ${#MIX_SAMPLES[@]} -eq 0 ]; then
+		echo_green "No data directories provided. Discovering samples from BAM alignment directories..."
+		if [ -n "${ALIGN_DIR_SHORT}" ]; then
+			mapfile -t SHORT_ONLY_SAMPLES < <(find "${ALIGN_DIR_SHORT}" -maxdepth 1 -name "*.bam" -printf "%f\n" | sed -E 's/(_STAR_Aligned\.sortedByCoord\.outXS)?\.bam$//' | sort | uniq)
+		fi
+		if [ -n "${ALIGN_DIR_MIX}" ]; then
+			mapfile -t MIX_SAMPLES < <(find "${ALIGN_DIR_MIX}" -maxdepth 1 -name "*.bam" -printf "%f\n" | sed -E 's/(_STAR_Aligned\.sortedByCoord\.outXS)?\.bam$//;s/(_long_aligned)?\.bam$//' | sort | uniq)
+		fi
+	fi
+	
+	[ "${#SHORT_ONLY_SAMPLES[@]}" -gt 0 ] && echo_green "Short-read-only samples detected: ${SHORT_ONLY_SAMPLES[*]}"
+	[ "${#MIX_SAMPLES[@]}" -gt 0 ] && echo_green "Mixed-read samples detected: ${MIX_SAMPLES[*]}"
+
+    # ---------------------------
 	# Define Step Functions Mapping
+	# ---------------------------
 	declare -A STEP_FUNCTIONS=(
 		[0]=step0_preprocess_trimming    [1]=step1_rrna_removal
 		[2]=step2_read_alignment         [3]=step3_gene_transcript_assembly
@@ -1172,11 +1287,11 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		[10]=step10_integrate_functional_annotation
 	)
 
-	echo_blue "Beginning pipeline execution..."
+	echo_green "Beginning pipeline execution..."
 	for STEP in "${STEP_ORDER[@]}"; do
 		if contains "$STEP" "${STEPS_TO_RUN[@]}"; then
 			
-			# --- Find required input file for the current step ---
+			# Find required input file for the current step
 			INPUT_GTF="" # Reset for each step
 			if [ "$STEP" -ge 6 ]; then
 				if [ -n "${finalGTF}" ] && [ -f "${finalGTF}" ]; then
@@ -1192,21 +1307,24 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 				fi
 			fi
 
-			# --- Conditional Validation ---
+			# Conditional validation 
 			case "$STEP" in
-				0)
-					[ -z "${DATA_DIR}" ] && { echo_red "Error: --dataDir is required for Step 0."; exit 1; }
-					;;
-				1)
-					[ -z "${DATA_DIR}" ] && { echo_red "Error: --dataDir is required for Step 1."; exit 1; }
-					[ -z "${RRNA_REF}" ] && { echo_green "Warning: --rrnaRef not provided. Skipping Step 1."; continue 2; }
-					;;
-				2)
-					[ -z "${DATA_DIR}" ] && { echo_red "Error: --dataDir is required for Step 2."; exit 1; }
-					[ -z "${GENOME_REF}" ] && { echo_red "Error: --genomeRef is required for Step 2."; exit 1; }
+				0|1|2)
+					[ -z "${DATA_DIR_SHORT}" ] && [ -z "${DATA_DIR_MIX}" ] && { echo_red "Error: --dataDirShort and/or --dataDirMix is required for Step ${STEP}."; exit 1; }
+					# Add check for rRNA_REF in step 1
+					if [ "$STEP" -eq 1 ] && [ -z "${RRNA_REF}" ]; then
+						echo_yellow "Warning: --rrnaRef not provided. Skipping Step 1."
+						continue 2
+					fi
 					;;
 				3)
-					[ -z "${ALIGN_DIR}" ] && [ ! -d "${ALIGN_DIR_INTERNAL}" ] && { echo_red "Error: --alignDir must be provided for Step 3 if not running from Step 2."; exit 1; }
+					# Must have an alignment source to run assembly
+					local has_internal_align_dir_short=$( [ -d "${ALIGN_DIR_SHORT_INTERNAL}" ] && [ -n "$(ls -A "${ALIGN_DIR_SHORT_INTERNAL}")" ] && echo "true" )
+					local has_internal_align_dir_mix=$( [ -d "${ALIGN_DIR_MIX_INTERNAL}" ] && [ -n "$(ls -A "${ALIGN_DIR_MIX_INTERNAL}")" ] && echo "true" )
+					if [ -z "${ALIGN_DIR_SHORT}" ] && [ -z "${ALIGN_DIR_MIX}" ] && [ -z "$has_internal_align_dir_short" ] && [ -z "$has_internal_align_dir_mix" ]; then
+						echo_red "Error: --alignDirShort and/or --alignDirMix must be provided for Step 3 if not running alignment steps (0-2)."
+						exit 1
+					fi
 					;;
 				4|5)
 					# These steps can be skipped if a suitable downstream file exists
@@ -1224,7 +1342,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 					;;
 			esac
 
-			# --- Execute Step ---
+			# Execute step
 			STEP_FUNCTION="${STEP_FUNCTIONS[$STEP]}"
 			echo_green "Executing Step $STEP: ${STEP_FUNCTION}"
 			# Pass the determined input GTF to the relevant steps
@@ -1235,6 +1353,25 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 			fi
 		fi
 	done
+
+	# Final cleanup 
+	if contains "9" "${STEPS_TO_RUN[@]}"; then
+		echo_green "Cleaning up TransDecoder intermediate files..."
+        # Check if the directory exists before trying to remove it
+		local transdecoder_dirs=("${FUNCTIONAL_DIR}"/*.transdecoder_dir)
+		if [ -e "${transdecoder_dirs[0]}" ]; then
+			echo_green "Cleaning up TransDecoder intermediate files..."
+			rm -rf "${FUNCTIONAL_DIR}"/*.transdecoder_dir
+		fi
+		
+		echo_green "Cleaning up InterProScan intermediate files..."
+		local interpro_dirs=("${FUNCTIONAL_DIR}"/interproscan_temp*)
+		if [ -e "${interpro_dirs[0]}" ]; then
+			echo_green "Cleaning up InterProScan intermediate files..."
+			rm -rf "${FUNCTIONAL_DIR}"/interproscan_temp*
+		fi
+	fi
+
 	# for STEP in "${STEP_ORDER[@]}"; do
 		# if contains "$STEP" "${STEPS_TO_RUN[@]}"; then
 			# # --- Conditional Validation ---
