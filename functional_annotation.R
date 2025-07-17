@@ -6,28 +6,28 @@
 # ---------------------------
 # Function to install and load Libraries
 # ---------------------------
-install_and_load <- function(packages) {
-  for (pkg in packages) {
-    if (!requireNamespace(pkg, quietly = TRUE)) {
-      if (pkg %in% rownames(installed.packages())) {
-        library(pkg, character.only = TRUE)
-      } else {
-        if (pkg %in% c("rtracklayer","GenomicFeatures", "GenomicRanges", "UniProt.ws","reactome.db")) {
-          if (!requireNamespace("BiocManager", quietly = TRUE)) {
-            install.packages("BiocManager", repos = "http://cran.us.r-project.org")
-          }
-          BiocManager::install(pkg, ask = FALSE)
-        } else {
-          install.packages(pkg, repos = "http://cran.us.r-project.org")
-        }
-        library(pkg, character.only = TRUE)
-      }
-    } else {
-      library(pkg, character.only = TRUE)
-    }
-  }
-}
-
+# install_and_load <- function(packages) {
+#   for (pkg in packages) {
+#     if (!requireNamespace(pkg, quietly = TRUE)) {
+#       if (pkg %in% rownames(installed.packages())) {
+#         library(pkg, character.only = TRUE)
+#       } else {
+#         if (pkg %in% c("rtracklayer","GenomicFeatures", "GenomicRanges", "UniProt.ws","reactome.db")) {
+#           if (!requireNamespace("BiocManager", quietly = TRUE)) {
+#             install.packages("BiocManager", repos = "http://cran.us.r-project.org")
+#           }
+#           BiocManager::install(pkg, ask = FALSE)
+#         } else {
+#           install.packages(pkg, repos = "http://cran.us.r-project.org")
+#         }
+#         library(pkg, character.only = TRUE)
+#       }
+#     } else {
+#       library(pkg, character.only = TRUE)
+#     }
+#   }
+# }
+# 
 # ---------------------------
 # Define required libraries
 # ---------------------------
@@ -36,7 +36,8 @@ required_packages <- c(
   "dplyr",
   "data.table",
   "stringr",
-  "rhmmer",
+  "readr",
+  #"rhmmer",
   "tidyr",
   "GenomicFeatures",
   "UniProt.ws",
@@ -46,13 +47,138 @@ required_packages <- c(
   "jsonlite",
   #"GeneAnswers",
   "purrr"
-  
+
 )
+# ---------------------------
+# Special handling for rhmmer installation --> time consuming
+# ---------------------------
+# # Define a personal library path inside the user's writable home directory
+# personal_lib_path <- file.path(Sys.getenv("HOME"), "R_libs")
+# dir.create(personal_lib_path, showWarnings = FALSE, recursive = TRUE)
+# # Ensure the personal library is in the R search path
+# .libPaths(c(personal_lib_path, .libPaths()))
+# 
+# # Check if rhmmer is installed. If not, install it from GitHub.
+# if (!requireNamespace("remotes", quietly = TRUE)) {
+#   install.packages(
+#     "remotes",
+#     repos = "https://cloud.r-project.org",
+#     lib   = personal_lib_path,
+#     dependencies = TRUE
+#   )
+# }
+# library(remotes)                         
+# 
+# if (!requireNamespace("rhmmer", quietly = TRUE)) {
+#   install_github(
+#     "arendsee/rhmmer",
+#     lib          = personal_lib_path,
+#     dependencies = TRUE,
+#     upgrade      = "never"
+#   )
+# }
+#library(rhmmer)
+# 
+# ---------------------------
+# Code bellow was directly taken from https://github.com/arendsee/rhmmer/blob/master/R/parse.R
+# ---------------------------
+read_domtblout <- function(file){
+  .parse_hmmer_output(file, 'domtblout')
+}
 
-# Install and load libraries
-install_and_load(required_packages)
 
+.parse_hmmer_output <- function(file, type){
+  
+  col_types <- if(type == 'tblout'){
+    readr::cols(
+      domain_name         = readr::col_character(),
+      domain_accession    = readr::col_character(),
+      query_name          = readr::col_character(),
+      query_accession     = readr::col_character(),
+      sequence_evalue     = readr::col_double(),
+      sequence_score      = readr::col_double(),
+      sequence_bias       = readr::col_double(),
+      best_domain_evalue  = readr::col_double(),
+      best_domain_score   = readr::col_double(),
+      best_domain_bis     = readr::col_double(),
+      domain_number_exp   = readr::col_double(),
+      domain_number_reg   = readr::col_integer(),
+      domain_number_clu   = readr::col_integer(),
+      domain_number_ov    = readr::col_integer(),
+      domain_number_env   = readr::col_integer(),
+      domain_number_dom   = readr::col_integer(),
+      domain_number_rep   = readr::col_integer(),
+      domain_number_inc   = readr::col_character()
+    )
+  } else if(type == 'domtblout'){
+    readr::cols(
+      domain_name         = readr::col_character(),
+      domain_accession    = readr::col_character(),
+      domain_len          = readr::col_integer(),
+      query_name          = readr::col_character(),
+      query_accession     = readr::col_character(),
+      qlen                = readr::col_integer(),
+      sequence_evalue     = readr::col_double(),
+      sequence_score      = readr::col_double(),
+      sequence_bias       = readr::col_double(),
+      domain_N            = readr::col_integer(),
+      domain_of           = readr::col_integer(),
+      domain_cevalue      = readr::col_double(),
+      domain_ievalue      = readr::col_double(),
+      domain_score        = readr::col_double(),
+      domain_bias         = readr::col_double(),
+      hmm_from            = readr::col_integer(),
+      hmm_to              = readr::col_integer(),
+      ali_from            = readr::col_integer(),
+      ali_to              = readr::col_integer(),
+      env_from            = readr::col_integer(),
+      env_to              = readr::col_integer(),
+      acc                 = readr::col_double()
+    )
+  }
+  
+  N <- length(col_types$cols)
+  
+  # the line delimiter should always be just "\n", even on Windows
+  lines <- readr::read_lines(file, lazy=FALSE, progress=FALSE)
+  
+  table <- sub(
+    pattern = sprintf("(%s).*", paste0(rep('\\S+', N), collapse=" +")),
+    replacement = '\\1',
+    x=lines,
+    perl = TRUE
+  ) %>%
+    gsub(pattern="  *", replacement="\t") %>%
+    paste0(collapse="\n") %>%
+    readr::read_tsv(
+      col_names=names(col_types$cols),
+      comment='#',
+      na='-',
+      col_types = col_types,
+      lazy=FALSE,
+      progress=FALSE
+    )
+  
+  if(type == 'domtblout'){
+    table$description <- lines[!grepl("^#", lines, perl=TRUE)] %>%
+      sub(
+        pattern = sprintf("%s *(.*)", paste0(rep('\\S+', N), collapse=" +")),
+        replacement = '\\1',
+        perl = TRUE
+      )
+  }
+  
+  table
+}
+# # Install and load libraries
+#install_and_load("rhmmer")
 
+# Load all required libraries (from Docker), stopping if one is missing
+for (pkg in required_packages) {
+  if (!require(pkg, character.only = TRUE)) {
+    stop(paste("Package", pkg, "is not installed. Please add it to environment.yml and rebuild the Docker image."))
+  }
+}
 # ---------------------------
 # Parse command-line arguments
 # ---------------------------
@@ -127,7 +253,7 @@ if (length(args) > 0) {
 # Import GTF annotations
 # ---------------------------
 
-stringtie_anno_path <- file.path(annotation_dir, "corrected_with_introns.gtf")
+stringtie_anno_path <- file.path(annotation_dir, "annotation_with_CDS.gtf")
 
 if (!file.exists(stringtie_anno_path)) {
   stop(paste("Error: GTF file not found at", stringtie_anno_path))
@@ -179,9 +305,21 @@ any_functional_data_exists <- FALSE
 
 # Define empty data frame structures
 empty_orfs <- data.frame(V1=character(), V2=character(), V3=character(), V4=character(), stringsAsFactors=FALSE)
-empty_blast <- data.frame(transcript_id=character(), hit_id=character(), percent_identity=numeric(), alignment_length=integer(), mismatches=integer(), gap_opens=integer(), query_start=integer(), query_end=integer(), subject_start=integer(), subject_end=integer(), evalue=numeric(), bit_score=numeric(), stringsAsFactors=FALSE)
-empty_pfam <- data.frame(domain_name=character(), domain_accession=character(), query_name=character(), query_accession=character(), sequence_evalue=numeric(), sequence_score=numeric(), sequence_bias=numeric(), domain_cevalue=numeric(), domain_ievalue=numeric(), domain_score=numeric(), domain_bias=numeric(), hmm_from=integer(), hmm_to=integer(), ali_from=integer(), ali_to=integer(), env_from=integer(), env_to=integer(), acc=numeric(), description=character(), domain_len=integer(), stringsAsFactors=FALSE)
-empty_interpro <- data.frame(transcript_id=character(), MD5=character(), length=integer(), analysis=character(), signature_accession=character(), description=character(), query_start=integer(), query_end=integer(), evalue=character(), status=character(), date=character(), interpro_accession=character(), interpro_description=character(), GO=character(), pathways=character(), stringsAsFactors=FALSE)
+empty_blast <- data.frame(transcript_id=character(), hit_id=character(), percent_identity=numeric(), 
+                          alignment_length=integer(), mismatches=integer(), gap_opens=integer(), 
+                          query_start=integer(), query_end=integer(), subject_start=integer(), 
+                          subject_end=integer(), evalue=numeric(), bit_score=numeric(), stringsAsFactors=FALSE)
+empty_pfam <- data.frame(domain_name=character(), domain_accession=character(), query_name=character(), 
+                         query_accession=character(), sequence_evalue=numeric(), sequence_score=numeric(), 
+                         sequence_bias=numeric(), domain_cevalue=numeric(), domain_ievalue=numeric(), 
+                         domain_score=numeric(), domain_bias=numeric(), hmm_from=integer(), hmm_to=integer(), 
+                         ali_from=integer(), ali_to=integer(), env_from=integer(), env_to=integer(), 
+                         acc=numeric(), description=character(), domain_len=integer(), stringsAsFactors=FALSE)
+empty_interpro <- data.frame(transcript_id=character(), MD5=character(), length=integer(), analysis=character(),
+                             signature_accession=character(), description=character(), query_start=integer(), 
+                             query_end=integer(), evalue=numeric(), status=character(), date=character(),
+                             interpro_accession=character(), interpro_description=character(), GO=character(),
+                             pathways=character(), stringsAsFactors=FALSE)
 
 # Load functional annotations
 # Load ORFs if file exists
@@ -215,7 +353,7 @@ uniprot_blastx <- if (file.exists(blastx_path)) {
 pfam <- if (file.exists(pfam_path)) {
   message("Loading Pfam data.")
   any_functional_data_exists <<- TRUE
-  rhmmer::read_domtblout(pfam_path)
+  read_domtblout(pfam_path)
 } else {
   empty_pfam
 }
@@ -238,10 +376,10 @@ interproscan <- if (file.exists(interproscan_path)) {
 #------------------------FILTER DATA--------------------------------------------
 # Prepare transcripts
 transcripts <- as.data.frame(stringtie_anno)
-transcripts <- transcripts[,c("seqnames","start","end","width","strand","source","type","score","phase",
-                              "cmp_ref","gene_id","gene_name","ref_gene_id","transcript_id","exon_number","cmp_ref_gene" )]
+# transcripts <- transcripts[,c("seqnames","start","end","width","strand","source","type","score","phase",
+#                               "cmp_ref","gene_id","gene_name","ref_gene_id","transcript_id","exon_number","cmp_ref_gene" )]
 
-
+gene_trans <- na.omit(unique(transcripts[,c("gene_id","transcript_id")]))
 
 if (any_functional_data_exists) {
   
@@ -332,7 +470,7 @@ if (any_functional_data_exists) {
   interproscan_filtered <- data.frame()
   if (nrow(interproscan) > 0) {
     interproscan_filtered <- interproscan %>%
-      dplyr::filter(interpro_accession != "-" & !is.na(interpro_accession))
+      dplyr::filter(interpro_accession != "-" & !is.na(interpro_accession)) %>%
       dplyr::filter(evalue != "-" & !is.na(evalue) & as.numeric(evalue) < interpro_evalue_threshold)
     # Parse the pathway column 
     # This separates each Database:ID pair into its own row
@@ -354,7 +492,7 @@ if (any_functional_data_exists) {
       unique()
     
     if(length(reactome_ids) > 0) {
-      reactome_names <- reactome.db::mapIds(
+      reactome_names <- AnnotationDbi::mapIds(
         reactome.db,
         keys = reactome_ids,
         column = "PATHNAME",
@@ -472,7 +610,7 @@ if (any_functional_data_exists) {
     dplyr::summarize(all_pathways = paste(unique(all_pathways), collapse = ", "), .groups = 'drop')
   
   # Process hits at the gene level
-  gene_trans <- na.omit(unique(transcripts[,c("gene_id","transcript_id")]))
+  #gene_trans <- na.omit(unique(transcripts[,c("gene_id","transcript_id")]))
   all_hits_combined_genes <- dplyr::bind_rows(pfam_hits, blastx_hits, blastp_hits, interpro_hits) %>%
     dplyr::left_join(gene_trans, by = "transcript_id") %>%
     dplyr::filter(!is.na(gene_id)) %>%
@@ -524,7 +662,7 @@ if (any_functional_data_exists) {
     dplyr::select(-c(all_hits_gene, all_GOs_gene, all_pathways_gene))
   
 } else {
-  message("Step 10: SKIPPED - No functional annotation files found.")
+  message("Step 10: No functional annotation files found - Skipping functional annotation integration.")
   # If skipping, ensure the main data frame has the necessary columns for downstream steps, filled with NA
   functional_transcripts_updated <- transcripts
   functional_transcripts_updated$best_SwissProt_blastp_hit <- NA_character_
@@ -542,7 +680,8 @@ if (any_functional_data_exists) {
 #---------------Step 11: Find overlapping genes and transcripts-----------------
 ################################################################################
 # Convert functional_transcripts to GRanges
-functional_transcripts_gr <- rtracklayer::makeGRangesFromDataFrame(
+message("Step 11: Finding overlapping genes and transcripts...")
+functional_transcripts_gr <- GenomicRanges::makeGRangesFromDataFrame(
   functional_transcripts_updated,
   keep.extra.columns = TRUE,
   seqnames.field = "seqnames",
@@ -620,7 +759,7 @@ check_all_transcripts_overlap <- function(gene_exons_gr) {
 
 # Convert to GRanges 
 if (!inherits(functional_transcripts_updated, "GRanges")) {
-  functional_transcripts_updated <- rtracklayer::makeGRangesFromDataFrame(
+  functional_transcripts_updated <- GenomicRanges::makeGRangesFromDataFrame(
     functional_transcripts_updated,
     keep.extra.columns = TRUE,
     seqnames.field = "seqnames",
@@ -667,7 +806,8 @@ if (ref_available) {  # Only perform if reference annotation is available
   # Interpretation of columns added by gffcompare: ref_gene_id - unique identifier of the matched reference gene, predicted gene has been mapped to an exact reference gene ID
   # cmp_ref_gene - gene name or ID in the reference annotation that the predicted gene overlaps with or aligns to
   
-  ref_anno_gr <- rtracklayer::makeGRangesFromDataFrame(
+  
+  ref_anno_gr <- GenomicRanges::makeGRangesFromDataFrame(
     ref_anno,
     keep.extra.columns = TRUE,
     seqnames.field = "seqnames",
@@ -709,7 +849,7 @@ if (ref_available) {  # Only perform if reference annotation is available
   
 } else {
   # If reference annotation is not available, partially skip Step 11
-  message("Step 11: Reference annotation not available - Skipping overlapping genes.")
+  message("Step 11: Reference annotation not available - Skipping overlap detection with reference annotation.")
 }
 # Merge overlap information back to functional_transcripts_updated
 functional_transcripts_updated <- as.data.frame(functional_transcripts_updated)
@@ -719,6 +859,7 @@ functional_transcripts_updated <- functional_transcripts_updated %>%
 #-----------Step 12: Find reversed duplicates-----------------------------------
 ################################################################################
 if (ref_available) {  # Only perform if reference annotation is available
+  message("Step 12: Finding reversed duplicates...")
   ref_anno_dt <- as.data.table(as.data.frame(ref_anno_gr))
   ref_anno_dt <- ref_anno_dt[, .(gene_id, strand_ref = as.character(strand))]
   head(ref_anno_dt)
@@ -743,10 +884,11 @@ if (ref_available) {  # Only perform if reference annotation is available
   message("Step 12: Reference annotation not available - Skipping reversed duplicates analysis.")
 }
 ################################################################################
-#-----------Step 13: Find fragmented and chimeric genes (with reference)--------
+#-----------Step 13.1: Find fragmented and chimeric genes (with reference)--------
 ################################################################################
 if (ref_available) {  # Only perform if reference annotation is available
   # One to many: one reference gene matches to many predictions
+  message("Step 13.1: Finding fragmented and chimeric genes (with reference)...")
   fragmented_genes <- functional_transcripts_updated[functional_transcripts_updated$type == "gene", ] %>%
     dplyr::group_by(overlapped_ref_gene) %>%
     dplyr::filter(n() > 1) %>%
@@ -769,8 +911,9 @@ if (ref_available) {  # Only perform if reference annotation is available
   message("Step 13.1: Reference annotation not available - Skipping fragmented and chimeric genes analysis with reference.")
 }
 ################################################################################
-#-----------Step 13: Find fragmented and chimeric genes (no reference)----------
+#-----------Step 13.2: Find fragmented and chimeric genes (de novo)-------------
 ################################################################################
+message("Step 13.2: Finding fragmented and chimeric genes (de novo)...")
 # ----------------------------------------
 # Identify fragmented genes de novo
 # ----------------------------------------
@@ -780,7 +923,7 @@ genes_df <- functional_transcripts_updated %>%
   dplyr::filter(type == "gene")
 
 # Convert to GRanges
-genes_gr <- rtracklayer::makeGRangesFromDataFrame(
+genes_gr <- GenomicRanges::makeGRangesFromDataFrame(
   genes_df,
   keep.extra.columns = TRUE,
   seqnames.field = "seqnames",
@@ -1043,32 +1186,68 @@ functional_transcripts_updated <- functional_transcripts_updated %>%
   )
 
 # ---------------------------
-# Save the Updated GTF
+# Final GTF Formatting and Export
 # ---------------------------
+# In functional_annotation.R
+
+# ---------------------------
+# Final GTF Formatting and Export
+# ---------------------------
+
+# Convert to data frame for final manipulation with dplyr
+final_df <- as.data.frame(functional_transcripts_updated)
+
+# --- Clean up feature types and generate informative IDs ---
+final_df_cleaned <- final_df %>%
+  # 1. Remove redundant 'transcript' rows with generic IDs
+  dplyr::filter(!(type == "transcript" & grepl("^nbis-transcript-", ID))) %>%
+  # 2. Standardize all transcript-level features ('RNA', 'mRNA') to 'transcript'
+  dplyr::mutate(type = if_else(type %in% c("RNA", "mRNA"), "transcript", type)) %>%
+  # 3. Generate clean, hierarchical IDs
+  dplyr::group_by(transcript_id) %>%
+  dplyr::mutate(
+    ID = case_when(
+      type == "gene"       ~ gene_id,
+      type == "transcript" ~ transcript_id,
+      type == "exon"       ~ paste0(transcript_id, ".exon.", exon_number),
+      # Keep original IDs for CDS and UTR features, which are already hierarchical
+      TRUE                 ~ ID 
+    )
+  ) %>%
+  dplyr::ungroup()
+
+# --- Remove functional annotations from all sub-features ---
+annotation_cols <- c("best_SwissProt_blastp_hit", "best_SwissProt_blastx_hit", 
+                     "best_Pfam_hit", "best_InterPro_hit", "all_hits", "has_ORF", 
+                     "all_GOs", "all_pathways")
+# Ensure columns exist before trying to modify them
+cols_to_clean <- intersect(annotation_cols, names(final_df_cleaned))
+
+sub_feature_types <- c("exon", "intron", "CDS", "five_prime_UTR", "three_prime_UTR")
+
+final_df_cleaned <- final_df_cleaned %>%
+  dplyr::mutate(across(all_of(cols_to_clean), ~if_else(type %in% sub_feature_types, NA, .)))
+
+
+# --- Convert back to GRanges and Export ---
+final_granges_for_export <- GenomicRanges::makeGRangesFromDataFrame(
+  final_df_cleaned,
+  keep.extra.columns = TRUE,
+  seqnames.field = "seqnames",
+  start.field = "start",
+  end.field = "end",
+  strand.field = "strand"
+)
+
 final_gtf_path <- file.path(functional_dir, "final_annotation.gtf")
-# Convert to GRanges for export 
-if (!inherits(functional_transcripts_updated, "GRanges")) {
-  functional_transcripts_updated <- rtracklayer::makeGRangesFromDataFrame(
-    functional_transcripts_updated,
-    keep.extra.columns = TRUE,
-    seqnames.field = "seqnames",
-    start.field = "start",
-    end.field = "end",
-    strand.field = "strand"
-  )
-}
-rtracklayer::export(functional_transcripts_updated, final_gtf_path, format = "gtf")
-#export(functional_transcripts_updated, file = final_gtf_path, sep = "\t", quote = FALSE, row.names = FALSE, col.names = TRUE)
+rtracklayer::export(final_granges_for_export, final_gtf_path, format = "gtf")
 
 cat("Functional annotation completed successfully. Final GTF saved at:", final_gtf_path, "\n")
-
 
 # ---------------------------
 # Print Summary and Recommendations
 # ---------------------------
 print_summary_and_advice <- function(final_df, ref_is_available) {
-  
-  # --- 1. Calculate Statistics ---
   
   # Ensure flag columns exist, if not, create them as FALSE
   flag_cols <- c("overlapped_predicted_gene", "is_potentially_fragmented_reference", 
@@ -1100,45 +1279,40 @@ print_summary_and_advice <- function(final_df, ref_is_available) {
   chimeric_ref <- if(ref_is_available) dplyr::n_distinct(gene_df$gene_id[which(gene_df$is_potentially_chimeric_reference == TRUE)]) else "N/A"
   reversed_duplicates_info <- if(ref_is_available) "Resolved where possible" else "N/A"
   
-  # --- 2. Print Formatted Report ---
+  cat("\n\n--- SmedAnno final annotation summary ---\n\n")
+  cat(sprintf("Total genes annotated: %d\n", total_genes))
+  cat(sprintf("Total transcripts annotated: %d\n\n", total_transcripts))
   
-  cat("\n\n--- SmedAnno Final Annotation Summary ---\n\n")
-  cat(sprintf("Total Genes Annotated: %d\n", total_genes))
-  cat(sprintf("Total Transcripts Annotated: %d\n\n", total_transcripts))
+  cat("--- Quality control flags ---\n")
+  cat(sprintf("Potentially overlapping genes: %s\n", overlapping_genes))
+  cat(sprintf("Potentially fragmented genes (de novo): %s\n", fragmented_de_novo))
+  cat(sprintf("Potentially chimeric genes (structural anomaly): %s\n", chimeric_structural))
+  cat(sprintf("Potentially chimeric genes (functional conflict): %s\n\n", chimeric_functional))
   
-  cat("--- Quality Control Flags ---\n")
-  cat(sprintf("Potentially Overlapping Genes (Predicted vs. Predicted): %s\n", overlapping_genes))
-  cat(sprintf("Potentially Fragmented Genes (de novo): %s\n", fragmented_de_novo))
-  cat(sprintf("Potentially Chimeric Genes (Structural Anomaly): %s\n", chimeric_structural))
-  cat(sprintf("Potentially Chimeric Genes (Functional Conflict): %s\n\n", chimeric_functional))
+  cat("--- Reference-based QC flags ---\n")
+  cat(sprintf("Potentially fragmented genes (vs. reference): %s\n", fragmented_ref))
+  cat(sprintf("Potentially chimeric genes (vs. reference): %s\n", chimeric_ref))
+  cat(sprintf("Reversed duplicates: %s\n\n", reversed_duplicates_info))
   
-  cat("--- Reference-Based QC Flags ---\n")
-  cat(sprintf("Potentially Fragmented Genes (vs. Reference): %s\n", fragmented_ref))
-  cat(sprintf("Potentially Chimeric Genes (vs. Reference): %s\n", chimeric_ref))
-  cat(sprintf("Reversed Duplicates: %s\n\n", reversed_duplicates_info))
-  
-  cat("--- Recommendations and Next Steps ---\n\n")
+  cat("--- Recommendations and next steps ---\n\n")
   cat("The automated annotation is complete, but manual inspection of flagged genes is critical for a high-quality final gene set.\n\n")
   
-  cat("1. For POTENTIALLY FRAGMENTED and OVERLAPPING Genes:\n")
+  cat("1. For POTENTIALLY FRAGMENTED and OVERLAPPING genes:\n")
   cat("   These genes are candidates for merging into a single, contiguous gene model. Analysis should include:\n")
   cat("   - Visual Inspection: Load  final GTF and the alignment BAM files into a genome browser (e.g., IGV).\n     Look for continuous read coverage spanning the gap between the flagged genes. This is strong evidence for merging.\n")
   cat("   - Promoter/Terminator Analysis: As noted in the manuscript, extract the genomic sequence between the flagged genes.\n     Use tools like Promoter 2.0 (for promoters) and ARNold (for terminators) to check for regulatory elements.\n     The ABSENCE of these elements in the intervening sequence supports a merge.\n\n")
   
-  cat("2. For POTENTIALLY CHIMERIC Genes:\n")
+  cat("2. For POTENTIALLY CHIMERIC genes:\n")
   cat("   These genes may be incorrect fusions of two or more distinct genes. Your analysis should include:\n")
-  cat("   - Structural Anomalies (Large Introns): For genes flagged with large introns, inspect them in a genome browser.\n     A very large intron with poor or non-existent read coverage often indicates an incorrect fusion. Check if other valid genes exist within that 'intron'.\n")
-  cat("   - Functional Conflicts: This is a strong indicator of a chimeric gene. The gene model likely fuses exons from two different functional genes.\n     Identify the conflicting annotations (e.g., from the 'all_hits' column) and use a genome browser to locate the likely fusion point and manually split the gene model.\n\n")
+  cat("   - Structural anomalies (Large introns): For genes flagged with large introns, inspect them in a genome browser.\n     A very large intron with poor or non-existent read coverage often indicates an incorrect fusion. Check if other valid genes exist within that 'intron'.\n")
+  cat("   - Functional conflicts: This is a strong indicator of a chimeric gene. The gene model likely fuses exons from two different functional genes.\n     Identify the conflicting annotations (e.g., from the 'all_hits' column) and use a genome browser to locate the likely fusion point and manually split the gene model.\n\n")
   
   cat("3. For REFERENCE-BASED Flags (if applicable):\n")
-  cat("   - 'Fragmented (vs. Reference)': This occurs when multiple predicted genes map to a single reference gene. This is a high-priority case for merging. Use the reference gene as a guide for the correct merged structure.\n")
-  cat("   - 'Chimeric (vs. Reference)': This occurs when a single predicted gene spans multiple distinct reference genes. This is strong evidence of a fusion event in your assembly and the gene should be split.\n")
-  cat("   - 'Reversed Duplicates': The pipeline attempts to resolve these by prioritizing predictions on the correct strand. Any loci where only an opposite-strand gene remains should be carefully reviewed for potential genuine antisense transcripts or annotation errors.\n\n")
+  cat("   - 'Fragmented (vs. reference)': This occurs when multiple predicted genes map to a single reference gene. This is a high-priority case for merging. Use the reference gene as a guide for the correct merged structure.\n")
+  cat("   - 'Chimeric (vs. reference)': This occurs when a single predicted gene spans multiple distinct reference genes. This is strong evidence of a fusion event in your assembly and the gene should be split.\n")
+  cat("   - 'Reversed duplicates': The pipeline attempts to resolve these by prioritizing predictions on the correct strand. Any loci where only an opposite-strand gene remains should be carefully reviewed for potential genuine antisense transcripts or annotation errors.\n\n")
   
   cat("FINAL ADVICE: After performing manual reviews and edits, you should finalize gene models. This ensures the most accurate representation of gene structures, lengths, and functional annotations for downstream analyses.\n\n")
 }
 
-# --- This is the FINAL line to add to your script, right before the end ---
-# Call the summary function at the very end of the script
-#head(functional_transcripts_updated)
 print_summary_and_advice(as.data.frame(functional_transcripts_updated), ref_available)
