@@ -9,7 +9,6 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	#set -x #Debugging mode
 	set -e  # Exit immediately if a command exits with a non-zero status
 	set -o pipefail  # Pipeline returns the exit status of the last command to fail
-	# set -x  # Enable debugging for troubleshooting
 
 	TEMP_FILES=()
 	cleanup_temp_files() {
