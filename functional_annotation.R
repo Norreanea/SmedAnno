@@ -196,6 +196,8 @@ annotation_dir <- ""
 functional_dir <- ""
 genome_ref <- ""
 output_dir <- ""
+transdecoder_gff_nucl <- ""  
+transdecoder_gff_mito <- "" 
 
 # Thresholds with default values
 max_distance <- 1000
@@ -236,6 +238,10 @@ if (length(args) > 0) {
       coverage_threshold <- as.numeric(value)
     } else if (arg == "--interproEvalue") {
       interpro_evalue_threshold <- as.numeric(value)
+    } else if (arg == "--transdecoder_gff_nucl") {
+      transdecoder_gff_nucl <- value
+    } else if (arg == "--transdecoder_gff_mito") {
+      transdecoder_gff_mito <- value
     }
   }
 }
@@ -253,13 +259,85 @@ if (length(args) > 0) {
 # Import GTF annotations
 # ---------------------------
 
-stringtie_anno_path <- file.path(annotation_dir, "annotation_with_CDS.gtf")
+genomic_gtf_path<- file.path(annotation_dir, "sanitized.final.gtf")
 
-if (!file.exists(stringtie_anno_path)) {
-  stop(paste("Error: GTF file not found at", stringtie_anno_path))
+if (!file.exists(genomic_gtf_path)) {
+  stop(paste("Error: GTF file not found at", genomic_gtf_path))
 }
 # Import StringTie annotations
-stringtie_anno <- rtracklayer::import.gff(stringtie_anno_path)
+genomic_gr  <- rtracklayer::import.gff(genomic_gtf_path)
+
+# ---------------------------
+# Map TransDecoder ORFs to genomic coordinates
+# ---------------------------
+map_transdecoder_to_genome <- function(td_gff_path, txdb, genomic_gr) {
+  message(paste("Mapping TransDecoder file:", td_gff_path))
+  td_gr <- rtracklayer::import.gff(td_gff_path)
+  # Filter for mRNA, CDS, and UTR features
+  features_to_map <- td_gr[td_gr$type %in% c("mRNA", "CDS", "five_prime_UTR", "three_prime_UTR")]
+  if (length(features_to_map) == 0) {
+    return(GRanges()) # Return empty object if no features found
+  }
+  # The seqnames in TransDecoder's GFF are the transcript IDs
+  names(features_to_map) <- seqnames(features_to_map)
+  # Get exon structures from the main GTF, named by transcript ID
+  exons_by_tx <- exonsBy(txdb, by = "tx", use.names = TRUE)
+  # Keep only the transcripts that have ORF predictions to map
+  exons_for_mapping <- exons_by_tx[names(exons_by_tx) %in% names(features_to_map)]
+  # Map the transcript-relative coordinates to genomic coordinates
+  mapped_features <- mapFromTranscripts(features_to_map, exons_for_mapping)
+  # Create a lookup table from the original genomic GTF (transcript -> gene, oId)
+  tx_to_gene_map <- as.data.frame(mcols(genomic_gr[genomic_gr$type == 'transcript',])) %>%
+    dplyr::select(transcript_id, gene_id, oId) %>%
+    dplyr::distinct()
+  # Get the transcript_id for each mapped feature
+  # The name of the original feature is the transcript_id
+  original_feature_names <- names(features_to_map[mapped_features$xHits])
+  mapped_features$transcript_id <- original_feature_names
+  # Preserve the original TransDecoder info
+  mapped_features$ID <- features_to_map[mapped_features$xHits]$ID
+  mapped_features$Parent <- features_to_map[mapped_features$xHits]$Parent
+  mapped_features$type <- features_to_map[mapped_features$xHits]$type
+  # Convert to data.frame to merge in the gene_id and oId from our lookup table
+  names(mapped_features)<- NULL
+  mapped_features_df <- as.data.frame(mapped_features)
+  mapped_features_df <- dplyr::left_join(mapped_features_df, tx_to_gene_map, by = "transcript_id")
+  # Convert back to GRanges, which preserves all our new columns
+  final_mapped_gr <- makeGRangesFromDataFrame(mapped_features_df, keep.extra.columns = TRUE)
+  # Add source and clean up
+  mcols(final_mapped_gr)$source <- "TransDecoder"
+  # The original feature type is preserved from the TransDecoder GFF
+  final_mapped_gr <- final_mapped_gr[
+    with(final_mapped_gr, order(seqnames, start)),
+  ]
+  return(final_mapped_gr)
+}
+
+# Create a TxDb object from our genomic GTF for mapping
+txdb <- makeTxDbFromGRanges(genomic_gr)
+all_mapped_cds <- GRangesList()
+
+# Map nuclear and mitochondrial ORFs if they exist
+if (transdecoder_gff_nucl != "" && file.exists(transdecoder_gff_nucl)) {
+  all_mapped_cds$nuclear <- map_transdecoder_to_genome(transdecoder_gff_nucl, txdb, genomic_gr)
+}
+if (transdecoder_gff_mito != "" && file.exists(transdecoder_gff_mito)) {
+  all_mapped_cds$mitochondrial <- map_transdecoder_to_genome(transdecoder_gff_mito, txdb, genomic_gr)
+}
+
+# Unlist into a single GRanges object
+final_mapped_cds <- unlist(all_mapped_cds)
+
+# Combine the original genomic features with the newly mapped CDS features
+# Remove any old/incorrect CDS features from the original GTF
+stringtie_anno <- genomic_gr[genomic_gr$type != "CDS"]
+# Append correctly mapped CDS features
+stringtie_anno <- c(stringtie_anno, final_mapped_cds)
+stringtie_anno <- stringtie_anno[
+  with(stringtie_anno, order(seqnames, start)),
+]
+names(stringtie_anno)<- NULL
+message("TransDecoder ORF mapping complete.")
 # ---------------------------
 # Conditionally import reference annotations
 # ---------------------------
