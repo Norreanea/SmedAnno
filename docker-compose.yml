@@ -1,13 +1,15 @@
+# This file is now simplified, as the wrapper script handles dynamic volume mounts.
 services:
   smedanno:
     build: .
     image: smedanno
+    user: root
     env_file:
       - .env
     working_dir: /smedanno
     volumes:
-      # Mounts the script's directory
+      # Mounts the script's directory and the output directory.
+      # All other input directories are now mounted dynamically by run_smedanno.sh
       - .:/smedanno
-      # Mounts the data and output directories using variables from the .env file
-      - ${DATA_PATH}:/data
       - ${OUTPUT_PATH}:/output
+      
