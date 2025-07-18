@@ -84,7 +84,7 @@ while [ $i -lt ${#ARGS[@]} ]; do
     arg="${ARGS[$i]}"
     
     case "$arg" in
-        --genomeRef|--genomeGTF|--rrnaRef|--finalGTF|--alignDir|--SR_RB_gtf_dir|--SR_DN_gtf_dir|--MR_RB_gtf_dir|--MR_DN_gtf_dir|--genomeDir|--dataDir)
+        --genomeRef|--genomeGTF|--rrnaRef|--finalGTF|--alignDirShort|--alignDirMix|--dataDirShort|--dataDirMix|--SR_RB_gtf_dir|--SR_DN_gtf_dir|--MR_RB_gtf_dir|--MR_DN_gtf_dir|--genomeDir)
             final_container_args+=("$arg")
             i=$((i + 1))
             
