@@ -41,11 +41,39 @@ cd SmedAnno
 ```
 
 ### Build the Docker Image
-This command builds the *smedanno* Docker image, which contains the Conda environment with all required tools. This may take some time on the first run as it downloads all dependencies:
+The installation is a two-step process. First, a large base image with all Conda dependencies is built. Then, the much smaller final application image is built on top of it:
 
 ```bash
+# Step 1: Build the base image (can take over 20 min and requires significant disk space)
+sudo docker build -t smedanno-base -f base.Dockerfile .
+
+# Step 2: Build the final application image (this is very fast)
 sudo docker build -t smedanno .
 ```
+**Important note for Windows/WSL users (disk space). **
+The smedanno-base image is very large (~136 GB) due to the extensive Conda environment. By default, Docker on WSL stores its data on your C: drive, which can cause it to fill up unexpectedly.
+
+It is highly recommended to move Docker's data root to a larger drive (e.g., D:) before running the build command.
+
+How to move Docker's data root in WSL:
+1. Stop Docker Desktop.
+2. Open a WSL terminal and create the Docker configuration directory if it doesn't exist:
+```
+mkdir -p ~/.docker
+```
+3. Create or edit the Docker daemon configuration file:
+```
+nano ~/.docker/daemon.json
+```
+4. Add the following content to the file, replacing D:\\docker-data with the path to your desired folder on another drive. Use the Windows-style path with double backslashes
+```
+{
+  "data-root": "D:\\docker-data"
+}
+```
+5. Save the file
+
+6. Restart Docker Desktop. Docker will now store all its images, containers, and volumes in the new location. You can now safely run the build commands.
 
 ## Usage
 All pipeline runs are initiated through the *run_smedanno.sh* wrapper script. This script automatically handles mounting your local data directories into the Docker container:
