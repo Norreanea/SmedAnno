@@ -175,13 +175,12 @@ Run only the functional annotation and quality control steps (9 and 10) on a GTF
     --threads 8 \
     --outputDir /path/to/your/output_directory
 ```
-**Full list of options**
+**Full list of options.**
 For a complete list of all available options and their descriptions, run:
 ```
 ./run_smedanno.sh --help
 ```
 
-**Pipeline steps**
 The pipeline is divided into the following modular steps, which can be run all at once (--all) or selectively (--steps 1,2,3...).
 
 - Step 0: Read Trimming / Quality-Filtering 
