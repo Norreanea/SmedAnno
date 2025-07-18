@@ -50,7 +50,7 @@ sudo docker build -t smedanno-base -f base.Dockerfile .
 # Step 2: Build the final application image (this is very fast)
 sudo docker build -t smedanno .
 ```
-**Important note for Windows/WSL users (disk space).**
+**Important note for Windows/WSL users (disk space)**
 
 The smedanno-base image is very large (~136 GB) due to the extensive Conda environment. By default, Docker on WSL stores its data on your C: drive, which can cause it to fill up unexpectedly.
 
@@ -68,9 +68,7 @@ nano ~/.docker/daemon.json
 ```
 4. Add the following content to the file, replacing D:\\docker-data with the path to your desired folder on another drive. Use the Windows-style path with double backslashes
 ```
-{
-  "data-root": "D:\\docker-data"
-}
+{"data-root": "D:\\docker-data"}
 ```
 5. Save the file
 
