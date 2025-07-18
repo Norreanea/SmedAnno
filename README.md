@@ -184,17 +184,17 @@ For a complete list of all available options and their descriptions, run:
 **Pipeline steps**
 The pipeline is divided into the following modular steps, which can be run all at once (--all) or selectively (--steps 1,2,3...).
 
-Step 0: Read Trimming / Quality-Filtering 
-Step 1: rRNA Removal 
-Step 2: Read Alignment to Reference Genome 
-Step 3: Gene and Transcript Assembly
-Step 4: Merge Reference-Based Assemblies
-Step 5: Merge *De Novo* Assemblies and Create Pre-Final Annotation 
-Step 6: Filter Transcripts
-Step 7: Isoform Comparison and Annotation 
-Step 8: GTF File Correction and Enhancement 
-Step 9: Functional Annotation 
-Step 10: Integrate Functional Annotation and Quality Control 
+- Step 0: Read Trimming / Quality-Filtering 
+- Step 1: rRNA Removal 
+- Step 2: Read Alignment to Reference Genome 
+- Step 3: Gene and Transcript Assembly
+- Step 4: Merge Reference-Based Assemblies
+- Step 5: Merge *De Novo* Assemblies and Create Pre-Final Annotation 
+- Step 6: Filter Transcripts
+- Step 7: Isoform Comparison and Annotation 
+- Step 8: GTF File Correction and Enhancement 
+- Step 9: Functional Annotation 
+- Step 10: Integrate Functional Annotation and Quality Control 
 
 ## Output
 Upon successful execution, SmedAnno generates a structured output directory containing:
