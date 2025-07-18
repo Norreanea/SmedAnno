@@ -144,7 +144,7 @@ Key points:
 - Output directory: The ```--outputDir``` argument is always required
 - Input data: Depending on the starting step, you must provide either read data (```--dataDirShort```, ```--dataDirMix```) or alignment data (```--alignDirShort```, ```--alignDirMix```)
 
-**Example 1:** Full *de novo* run from short-read FASTQ files
+**Example 1:** Full *de novo* run from short-read FASTQ files.
 This is the most common use case. The pipeline will run all steps from 0 to 10.
 ```
 ./run_smedanno.sh \
@@ -154,7 +154,7 @@ This is the most common use case. The pipeline will run all steps from 0 to 10.
     --threads 8 \
     --outputDir /path/to/your/output_directory
 ```
-**Example 2:** Reference-based run from existing BAM files
+**Example 2:** Reference-based run from existing BAM files.
 Start from Step 3 using pre-aligned BAM files and a reference GTF.
 ```
 ./run_smedanno.sh \
@@ -165,7 +165,7 @@ Start from Step 3 using pre-aligned BAM files and a reference GTF.
     --threads 8 \
     --outputDir /path/to/your/output_directory
 ```
-**Example 3:** Annotation-only run on a final GTF
+**Example 3:** Annotation-only run on a final GTF.
 Run only the functional annotation and quality control steps (9 and 10) on a GTF file you've already generated.
 ```
 ./run_smedanno.sh \
