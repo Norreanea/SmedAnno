@@ -161,10 +161,10 @@ All pipeline runs are initiated through the *run_smedanno.sh* wrapper script. Th
 		 
 		 Examples:
 		   Run all steps:
-		     ./run_smedanno.sh --genomeRef /path/to/genome.fa --dataDirShort ./data --outputDir ./output --threads 4 --all
+		     ./run_smedanno.sh --genomeRef /path/to/genome.fa --dataDirShort /path/to/data --outputDir /path/to/output --threads 4 --all
 		 
 		   Run Steps 8, 9, 10 only starting from a GTF file:
-		     ./run_smedanno.sh --finalGTF /path/to/your.gtf --genomeRef /path/to/genome.fa --outputDir ./output --steps 8,9,10
+		     ./run_smedanno.sh --finalGTF /path/to/your.gtf --genomeRef /path/to/genome.fa --outputDir /path/to/output --steps 8,9,10
 ```
 Key points:
 - Use absolute paths: Always provide absolute paths for all file and directory arguments (e.g., ```/home/user/data/genome.fa```, not ```../data/genome.fa```)
