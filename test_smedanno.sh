@@ -15,11 +15,11 @@ BLUE='\033[1;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Base paths relative to the SmedAnno-main directory 
-BASE_DIR="../"
+
+BASE_DIR="/mnt/e/Stringtie_anno/article/Final/"
 GENOME_REF="${BASE_DIR}/SM_genome_reduced/smed_chr4_reduced.fa"
 GENOME_GTF="${BASE_DIR}/SM_genome_reduced/SM_HC_filtered_chr4.gtf"
-DATA_DIR="${BASE_DIR}/SM_genome_reduced/" # Contains the 'short_reads' folder
+DATA_DIR="${BASE_DIR}/SM_genome_reduced" # Contains the 'short_reads' folder
 ALIGN_DIR="${BASE_DIR}/output_new/alignment/"
 PREEXISTING_GTF="${BASE_DIR}/output_new/annotation/corrected_with_introns.gtf"
 RUN_SCRIPT="./run_smedanno.sh"
@@ -38,8 +38,8 @@ run_test() {
     shift 3
     local command_to_run=("$@")
 
-    local output_dir="${BASE_DIR}/test_output_${test_num}"
-    local log_file="${BASE_DIR}/test_log_${test_num}.txt"
+    local output_dir="${BASE_DIR}/testt_output_${test_num}"
+    local log_file="${BASE_DIR}/testt_log_${test_num}.txt"
 
     echo -e "\n${BLUE}=================================================================${NC}"
     echo -e "${BLUE}▶️  STARTING TEST ${test_num}: ${description}${NC}"
@@ -80,11 +80,11 @@ run_test() {
 
 # Test 1: Full DE NOVO pipeline from FASTQ
 run_test "1" "Full DE NOVO pipeline from FASTQ (steps 0-10)" "PASS" \
-    "$RUN_SCRIPT" --all --dataDirShort "$DATA_DIR" --genomeRef "$GENOME_REF" --threads 4
+    "$RUN_SCRIPT" --all --dataDirShort "${DATA_DIR}/short_reads/" --genomeRef "$GENOME_REF" --threads 4
 
 # Test 2: Full REFERENCE-BASED pipeline from FASTQ
 run_test "2" "Full REFERENCE-BASED pipeline from FASTQ (steps 0-10)" "PASS" \
-    "$RUN_SCRIPT" --all --dataDirShort "$DATA_DIR" --genomeRef "$GENOME_REF" --genomeGTF "$GENOME_GTF" --threads 4
+    "$RUN_SCRIPT" --all --dataDirShort "${DATA_DIR}/short_reads/" --genomeRef "$GENOME_REF" --genomeGTF "$GENOME_GTF" --threads 4
 
 # Test 3: DE NOVO assembly from existing BAM files + change StringTie2 version
 run_test "3" "DE NOVO assembly from existing BAMs (steps 3,5-10) and change StringTie2 version" "PASS" \
@@ -97,7 +97,6 @@ run_test "4" "REFERENCE-BASED assembly from existing BAMs (steps 3,4,5-10)" "PAS
 # Test 5: Annotation-only pipeline from a pre-existing GTF
 run_test "5" "Annotation-only from a pre-existing GTF (steps 9,10)" "PASS" \
     "$RUN_SCRIPT" --steps "9,10" --finalGTF "$PREEXISTING_GTF" --genomeRef "$GENOME_REF" --threads 4
-
 
 # Invalid runs 
 
