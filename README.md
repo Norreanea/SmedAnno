@@ -18,7 +18,7 @@ SmedAnno is a robust and versatile RNA-Seq annotation pipeline designed to strea
 ## Features
 
 - **End-to-end analysis:** Covers all stages from read preprocessing and alignment to transcript assembly and functional annotation.
-- **Hybrid read support:** Natively processes short reads (Illumina), long reads (PacBio/ONT), or a mix of both using STAR and minimap2.
+- **Hybrid read support:** RNA-seq short reads (Illumina), long reads (PacBio/ONT), or a mix of both.
 - **Flexible assembly:** Performs both reference-based and de novo transcript assembly with StringTie.
 - **Robust annotation:** Integrates results from TransDecoder, BLAST, HMMER (Pfam), and InterProScan to build a high-quality, functionally annotated gene set.
 - **Quality control:** The final step analyzes the annotation for structural and functional inconsistencies, flagging potentially fragmented or chimeric genes for manual review.
