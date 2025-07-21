@@ -605,6 +605,17 @@ if (any_functional_data_exists) {
       dplyr::group_by(transcript_id) %>%
       dplyr::summarize(all_pathways = paste(unique(pathway_name_clean), collapse = ", "), .groups = 'drop') %>% 
       dplyr::left_join(gene_trans, by = "transcript_id")
+    
+    # If InterProScan was not run, the reactome object will not exist
+    if (!exists("reactome_results_combined")) {
+      message("No InterProScan/Reactome data found. Creating empty placeholder for pathway analysis.")
+      reactome_results_combined <- data.frame(
+        transcript_id = character(0),
+        all_pathways = character(0),
+        gene_id = character(0),
+        stringsAsFactors = FALSE
+      )
+    }
   }
   
   # Get best hits
@@ -664,8 +675,7 @@ if (any_functional_data_exists) {
   interpro_GOs <- interpro_GOs[interpro_GOs$GO != "-",] %>% dplyr::group_by(transcript_id) %>%
     dplyr::summarize(all_GOs = paste(unique(GO), collapse = ", "), .groups = 'drop') %>% dplyr::left_join(gene_trans, by = "transcript_id")
   #interpro_pathways <- if (nrow(interproscan_filtered) > 0) interproscan_filtered %>% dplyr::select(transcript_id, hit = pathways) else data.frame(transcript_id=character(), hit=character())
-  
-  # MODIFIED: bind_rows now includes interpro_hits
+
   all_hits_combined <- dplyr::bind_rows(pfam_hits, blastx_hits, blastp_hits, interpro_hits) %>%
     dplyr::filter(!is.na(hit) & hit != "") %>%
     dplyr::group_by(transcript_id) %>%
@@ -1275,13 +1285,13 @@ functional_transcripts_updated <- functional_transcripts_updated %>%
 # Convert to data frame for final manipulation with dplyr
 final_df <- as.data.frame(functional_transcripts_updated)
 
-# --- Clean up feature types and generate informative IDs ---
+# Clean up feature types and generate informative IDs 
 final_df_cleaned <- final_df %>%
-  # 1. Remove redundant 'transcript' rows with generic IDs
+  # Remove redundant 'transcript' rows with generic IDs
   dplyr::filter(!(type == "transcript" & grepl("^nbis-transcript-", ID))) %>%
-  # 2. Standardize all transcript-level features ('RNA', 'mRNA') to 'transcript'
+  # Standardize all transcript-level features ('RNA', 'mRNA') to 'transcript'
   dplyr::mutate(type = if_else(type %in% c("RNA", "mRNA"), "transcript", type)) %>%
-  # 3. Generate clean, hierarchical IDs
+  # Generate clean, hierarchical IDs
   dplyr::group_by(transcript_id) %>%
   dplyr::mutate(
     ID = case_when(
@@ -1294,7 +1304,7 @@ final_df_cleaned <- final_df %>%
   ) %>%
   dplyr::ungroup()
 
-# --- Remove functional annotations from all sub-features ---
+# Remove functional annotations from all sub-features 
 annotation_cols <- c("best_SwissProt_blastp_hit", "best_SwissProt_blastx_hit", 
                      "best_Pfam_hit", "best_InterPro_hit", "all_hits", "has_ORF", 
                      "all_GOs", "all_pathways")
@@ -1307,7 +1317,7 @@ final_df_cleaned <- final_df_cleaned %>%
   dplyr::mutate(across(all_of(cols_to_clean), ~if_else(type %in% sub_feature_types, NA, .)))
 
 
-# --- Convert back to GRanges and Export ---
+# Convert back to GRanges and export
 final_granges_for_export <- GenomicRanges::makeGRangesFromDataFrame(
   final_df_cleaned,
   keep.extra.columns = TRUE,
