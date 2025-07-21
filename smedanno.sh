@@ -103,7 +103,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		echo "                                If not set, the script will auto-detect 'mixed' if headers match --mitoPattern."
 		echo "                                default: 'nuclear'."
 		echo "  --mitoPattern <regex>         Regular expression to identify mitochondrial headers for 'mixed' mode."
-		echo "                                default: '[Mm]ito|[Mm]itochondria|mtDNA'."
+		echo "                                default: '[Mm]ito|[Mm]tDNA'."
 		echo "  --geneticCodeNucl <code>      Genetic code for nuclear transcripts. Default: 'Universal'."
 		echo "  --geneticCodeMito <code>      Genetic code for mitochondrial transcripts. Default: 'Mitochondrial-Vertebrates'."
 		echo ""
@@ -140,10 +140,10 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		echo ""
 		echo "Examples:"
 		echo "  Run all steps:"
-		echo "    ./run_smedanno.sh --genomeRef /path/to/genome.fa --dataDirShort ./data --outputDir ./output --threads 4 --all"
+		echo "    ./run_smedanno.sh --genomeRef /path/to/genome.fa --dataDirShort /path/to/data --outputDir /path/to/output --threads 4 --all"
 		echo ""
 		echo "  Run Steps 8, 9, 10 only starting from a GTF file:"
-		echo "    ./run_smedanno.sh --finalGTF /path/to/your.gtf --genomeRef /path/to/genome.fa --outputDir ./output --steps 8,9,10"
+		echo "    ./run_smedanno.sh --finalGTF /path/to/your.gtf --genomeRef /path/to/genome.fa --outputDir /path/to/output --steps 8,9,10"
 		exit 0
 	}
 
@@ -1025,28 +1025,33 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 				echo_yellow "Skipping mitochondrial transcript extraction, file already exists."
 			fi
 		fi
+				
+
 		run_transdecoder() {
-				local input_fasta="$1"; local genetic_code="$2"; local output_prefix="$3"
-				# Checkpoint: skip if final output already exists
-				local final_pep_file="${FUNCTIONAL_DIR}/$(basename "${input_fasta}").transdecoder.pep"
-				if [ -s "${final_pep_file}" ]; then
-					echo_yellow "Skipping TransDecoder for $(basename "${input_fasta}"), final output exists."
-					return 0
-				fi
-				local genetic_code_cap=${genetic_code^}
-				echo_green "Running TransDecoder for '${output_prefix}' with genetic code '${genetic_code_cap}'..."
-				pushd "${FUNCTIONAL_DIR}" > /dev/null
-				# Use the relative basename of the fasta file, as we are now in its directory
-				local fasta_basename
-				fasta_basename=$(basename "${input_fasta}")
+			local input_fasta="$1"; local genetic_code="$2"; local output_prefix="$3"
+			local final_pep_file="${FUNCTIONAL_DIR}/$(basename "${input_fasta}").transdecoder.pep"
+			if [ -s "${final_pep_file}" ]; then
+				echo_yellow "Skipping TransDecoder for $(basename "${input_fasta}"), final output exists."
+				return 0
+			fi
+			local genetic_code_cap=${genetic_code^}
+			echo_green "Running TransDecoder for '${output_prefix}' with genetic code '${genetic_code_cap}'..."
+			pushd "${FUNCTIONAL_DIR}" > /dev/null
+			local fasta_basename
+			fasta_basename=$(basename "${input_fasta}")
 
-				# Run LongOrfs using the relative filename
-				TransDecoder.LongOrfs -t "${fasta_basename}" --genetic_code "${genetic_code_cap}"
+			TransDecoder.LongOrfs -t "${fasta_basename}" --genetic_code "${genetic_code_cap}"
 
-				# Run Predict using the relative filename
-				TransDecoder.Predict -t "${fasta_basename}" --genetic_code "${genetic_code_cap}" --single_best_only
-				popd > /dev/null
-			    }
+			# Conditionally add --no_refine_starts for mito transcripts to avoid training errors on small datasets
+			local predict_opts=""
+			if [ "${output_prefix}" == "mito" ]; then
+				echo_yellow "Mitochondrial dataset detected. Skipping start site refinement in TransDecoder.Predict."
+				predict_opts="--no_refine_starts"
+			fi
+			TransDecoder.Predict -t "${fasta_basename}" --genetic_code "${genetic_code_cap}" --single_best_only ${predict_opts}
+			
+			popd > /dev/null
+		}
 
 		if [[ "$GENOME_TYPE" == "nuclear" || "$GENOME_TYPE" == "mixed" ]]; then
 		    if [ -s "${NUCL_TRANSCRIPTS_FA}" ]; then 
@@ -1342,6 +1347,18 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		fi
 		if [ -n "${ALIGN_DIR_MIX}" ]; then
 			mapfile -t MIX_SAMPLES < <(find "${ALIGN_DIR_MIX}" -maxdepth 1 -name "*.bam" -printf "%f\n" | sort )
+		fi
+	fi
+
+	if [ ${#SHORT_ONLY_SAMPLES[@]} -eq 0 ] && [ ${#MIX_SAMPLES[@]} -eq 0 ]; then
+		# This block runs only if no FASTQ files were found and we relied on alignDirs
+		if [ -n "${ALIGN_DIR_SHORT}" ]; then
+			echo_red "Error: --alignDirShort was provided, but no .bam files were found in that directory."
+			exit 1
+		fi
+		if [ -n "${ALIGN_DIR_MIX}" ]; then
+			echo_red "Error: --alignDirMix was provided, but no .bam files were found in that directory."
+			exit 1
 		fi
 	fi
 	
