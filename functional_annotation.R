@@ -359,15 +359,29 @@ if (transdecoder_gff_mito != "" && file.exists(transdecoder_gff_mito)) {
 # Unlist into a single GRanges object
 final_mapped_cds <- unlist(all_mapped_cds)
 
-# Combine the original genomic features with the newly mapped CDS features
-# Remove any old/incorrect CDS features from the original GTF
-stringtie_anno <- genomic_gr[genomic_gr$type != "CDS"]
-# Append correctly mapped CDS features
-stringtie_anno <- c(stringtie_anno, final_mapped_cds)
+message("Assembling final GTF, replacing original exons with TransDecoder features where available...")
+
+# Get the list of transcript IDs that have new features from TransDecoder
+processed_tx_ids <- unique(final_mapped_cds$transcript_id)
+
+# From the original annotation, remove the old 'exon' and 'intron' features
+# for transcripts that have been updated by TransDecoder. Keep the original
+# 'gene' and 'transcript' lines as the main structure
+stringtie_anno_filtered <- genomic_gr[
+  !(genomic_gr$transcript_id %in% processed_tx_ids & genomic_gr$type %in% c("exon", "intron"))
+]
+# From the mapped TransDecoder features, we only need the CDS and UTRs
+# Discard the redundant 'mRNA'/'transcript' hits from TransDecoder's GFF3
+td_features_only <- final_mapped_cds[final_mapped_cds$type %in% c("CDS", "five_prime_UTR", "three_prime_UTR")]
+# Combine the filtered original annotation with the new TransDecoder features
+stringtie_anno <- c(stringtie_anno_filtered, td_features_only)
+# Sort the final combined object for a clean GTF file
 stringtie_anno <- stringtie_anno[
   with(stringtie_anno, order(seqnames, start)),
 ]
-names(stringtie_anno)<- NULL
+names(stringtie_anno) <- NULL
+# Pass this clean object to the next step
+transcripts <- as.data.frame(stringtie_anno)
 message("TransDecoder ORF mapping complete.")
 # ---------------------------
 # Conditionally import reference annotations
@@ -483,7 +497,7 @@ interproscan <- if (file.exists(interproscan_path)) {
 
 #------------------------FILTER DATA--------------------------------------------
 # Prepare transcripts
-transcripts <- as.data.frame(stringtie_anno)
+#transcripts <- as.data.frame(stringtie_anno)
 # transcripts <- transcripts[,c("seqnames","start","end","width","strand","source","type","score","phase",
 #                               "cmp_ref","gene_id","gene_name","ref_gene_id","transcript_id","exon_number","cmp_ref_gene" )]
 
