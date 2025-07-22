@@ -62,11 +62,11 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		echo "  --genomeRef PATH              Absolute path to genome reference FASTA file"
 		echo "  --dataDirShort PATH           Absolute path to input directory with ONLY short-read FASTQ files."
 		echo "  --dataDirMix PATH             Absolute path to input directory with mixed-read data (must contain 'short_reads' and 'long_reads' sub-folders)."
-	        echo ""
+	    echo ""
 		echo "Mandatory options for specific steps:"
 		echo "  --finalGTF PATH               Absolute path to final GTF file (optional, required for Functional Annotation only)"
 		echo "  --alignDirShort PATH          Absolute path to directory with ONLY short-read alignment BAM files (optional, required for Gene and Transcript Assembly only)."
-	        echo "  --alignDirMix PATH            Absolute path to directory with mixed-read alignment BAM files (optional, required for Gene and Transcript Assembly only)."
+	    echo "  --alignDirMix PATH            Absolute path to directory with mixed-read alignment BAM files (optional, required for Gene and Transcript Assembly only)."
 		echo "  --SR_RB_gtf_dir PATH          Directory containing SR_RB.gtf files (optional, required for Merging Assemblies)"
 		echo "  --SR_DN_gtf_dir PATH          Directory containing SR_DN.gtf files (optional, required for Merging Assemblies)"
 		echo "  --MR_RB_gtf_dir PATH          Directory containing MR_RB.gtf files (optional, required for Merging Assemblies)"
@@ -1082,28 +1082,32 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		fi
 
 		# Download databases if needed
-		if [ -z "${BLAST_DB_SwissProt}" ]; then
-			BLAST_DB_SwissProt="${FUNCTIONAL_DIR}/blast_dbs/swissprot"
-			if [ ! -f "${BLAST_DB_SwissProt}.pin" ]; then
-				echo_green  "SwissProt database not found. Downloading..."
-				mkdir -p "${FUNCTIONAL_DIR}/blast_dbs"
-				if ! wget -T 15 -qO - "https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/uniprot_sprot.fasta.gz" | gunzip -c > "${FUNCTIONAL_DIR}/blast_dbs/swissprot.fasta"; then
-					echo_red "Error: Failed to download SwissProt database. Check network connection or disk space."
-					exit 1
+		if [[ "$FUNCTIONAL_METHODS" =~ BLAST ]]; then
+			if [ -z "${BLAST_DB_SwissProt}" ]; then
+				BLAST_DB_SwissProt="${FUNCTIONAL_DIR}/blast_dbs/swissprot"
+				if [ ! -f "${BLAST_DB_SwissProt}.pin" ]; then
+					echo_green  "SwissProt database not found. Downloading..."
+					mkdir -p "${FUNCTIONAL_DIR}/blast_dbs"
+					if ! wget -T 15 -qO - "https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/uniprot_sprot.fasta.gz" | gunzip -c > "${FUNCTIONAL_DIR}/blast_dbs/swissprot.fasta"; then
+						echo_red "Error: Failed to download SwissProt database. Check network connection or disk space."
+						exit 1
+					fi
+					makeblastdb -in "${FUNCTIONAL_DIR}/blast_dbs/swissprot.fasta" -dbtype prot -out "${BLAST_DB_SwissProt}"
 				fi
-				makeblastdb -in "${FUNCTIONAL_DIR}/blast_dbs/swissprot.fasta" -dbtype prot -out "${BLAST_DB_SwissProt}"
 			fi
 		fi
-
-		if [ -z "${PFAM_DB}" ]; then
-			local PFAM_DB_PATH="${PFAM_DB:-${FUNCTIONAL_DIR}/pfam_db}"
-			if [ ! -f "${PFAM_DB_PATH}/Pfam-A.hmm.h3m" ]; then
-				echo_green "Pfam database not found. Downloading..."
-				mkdir -p "${PFAM_DB_PATH}"
-				wget -T 15 -qO - "https://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.hmm.gz" | gunzip -c > "${PFAM_DB_PATH}/Pfam-A.hmm" || { echo_red "Pfam download failed."; exit 1; }
-				hmmpress "${PFAM_DB_PATH}/Pfam-A.hmm"
-			else
-				echo_green "Pfam database found. Skipping download."
+		
+		if [[ "$FUNCTIONAL_METHODS" == *"PFAM"* ]]; then
+			if [ -z "${PFAM_DB}" ]; then
+				local PFAM_DB_PATH="${PFAM_DB:-${FUNCTIONAL_DIR}/pfam_db}"
+				if [ ! -f "${PFAM_DB_PATH}/Pfam-A.hmm.h3m" ]; then
+					echo_green "Pfam database not found. Downloading..."
+					mkdir -p "${PFAM_DB_PATH}"
+					wget -T 15 -qO - "https://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.hmm.gz" | gunzip -c > "${PFAM_DB_PATH}/Pfam-A.hmm" || { echo_red "Pfam download failed."; exit 1; }
+					hmmpress "${PFAM_DB_PATH}/Pfam-A.hmm"
+				else
+					echo_green "Pfam database found. Skipping download."
+				fi
 			fi
 		fi
 
