@@ -47,7 +47,7 @@ required_packages <- c(
   "jsonlite",
   #"GeneAnswers",
   "purrr"
-
+  
 )
 # ---------------------------
 # Special handling for rhmmer installation --> time consuming
@@ -285,7 +285,7 @@ map_transdecoder_to_genome <- function(td_gff_path, txdb, genomic_gr) {
   # Keep only the transcripts that have ORF predictions to map
   exons_for_mapping <- exons_by_tx[names(exons_by_tx) %in% names(features_to_map)]
   # Map the transcript-relative coordinates to genomic coordinates
-  mapped_features <- mapFromTranscripts(features_to_map, exons_for_mapping)
+  mapped_features <- GenomicFeatures::mapFromTranscripts(features_to_map, exons_for_mapping)
   # Create a lookup table from the original genomic GTF (transcript -> gene, oId)
   tx_to_gene_map <- as.data.frame(mcols(genomic_gr[genomic_gr$type == 'transcript',])) %>%
     dplyr::select(transcript_id, gene_id, oId) %>%
@@ -303,7 +303,7 @@ map_transdecoder_to_genome <- function(td_gff_path, txdb, genomic_gr) {
   mapped_features_df <- as.data.frame(mapped_features)
   mapped_features_df <- dplyr::left_join(mapped_features_df, tx_to_gene_map, by = "transcript_id")
   # Convert back to GRanges, which preserves all our new columns
-  final_mapped_gr <- makeGRangesFromDataFrame(mapped_features_df, keep.extra.columns = TRUE)
+  final_mapped_gr <- GenomicRanges::makeGRangesFromDataFrame(mapped_features_df, keep.extra.columns = TRUE)
   # Add source and clean up
   mcols(final_mapped_gr)$source <- "TransDecoder"
   # The original feature type is preserved from the TransDecoder GFF
@@ -313,9 +313,40 @@ map_transdecoder_to_genome <- function(td_gff_path, txdb, genomic_gr) {
   return(final_mapped_gr)
 }
 
-# Create a TxDb object from our genomic GTF for mapping
-txdb <- makeTxDbFromGRanges(genomic_gr)
-all_mapped_cds <- GRangesList()
+message("Performing final data sanitization before creating TxDb...")
+gr_df <- as.data.frame(genomic_gr)
+
+# Force key columns to character type to avoid factor issues and remove NA entries
+gr_df_cleaned <- gr_df %>%
+  dplyr::mutate(
+    strand = as.character(strand),
+    transcript_id = as.character(transcript_id),
+    gene_id = as.character(gene_id)
+  ) %>%
+  # Remove any rows where essential information is missing
+  dplyr::filter(!is.na(strand) & strand %in% c("+", "-") & !is.na(transcript_id))
+
+# Get a list of valid transcript and gene IDs from the cleaned data
+valid_transcript_ids <- unique(gr_df_cleaned[gr_df_cleaned$type == 'transcript', 'transcript_id'])
+valid_gene_ids <- unique(gr_df_cleaned[gr_df_cleaned$type == 'transcript', 'gene_id'])
+
+# Filter the cleaned data frame to ensure all features belong to a valid gene/transcript
+gr_df_final <- gr_df_cleaned %>%
+  dplyr::filter(
+    (type == 'gene' & gene_id %in% valid_gene_ids) |
+      (type != 'gene' & transcript_id %in% valid_transcript_ids)
+  )
+
+message(paste("Proceeding with", length(valid_gene_ids), "genes and", 
+              length(valid_transcript_ids), "transcripts to build the database."))
+
+# Convert the sanitized data.frame back to a GRanges object
+gr_for_txdb <- GenomicRanges::makeGRangesFromDataFrame(gr_df_final, keep.extra.columns = TRUE)
+
+# Create the TxDb from the fully sanitized GRanges object
+txdb <- GenomicFeatures::makeTxDbFromGRanges(gr_for_txdb)
+
+all_mapped_cds <- GenomicRanges::GRangesList()
 
 # Map nuclear and mitochondrial ORFs if they exist
 if (transdecoder_gff_nucl != "" && file.exists(transdecoder_gff_nucl)) {
@@ -373,7 +404,6 @@ blastp_path <- file.path(functional_dir, "blastp_results.out")
 blastx_path <- file.path(functional_dir, "blastx_results.out")
 pfam_path <- file.path(functional_dir, "pfam_results.out")
 interproscan_path <- file.path(functional_dir, "interpro.tsv")
-#pfam2go_path <- file.path(functional_dir, "pfam2go.txt")  # Ensure this file exists
 
 if (!file.exists(orfs_path) & !file.exists(blastp_path) & !file.exists(blastx_path) & !file.exists(pfam_path) & !file.exists(interproscan_path)) {
   print("Functional annotation files are missing. Skipping integration.")
@@ -467,8 +497,10 @@ if (any_functional_data_exists) {
   # Process ORFs data
   if (nrow(orfs) > 0) {
     orfs <- orfs %>%
-      tidyr::separate(V4, into = c("transcript_id", "orf_info"), sep = ":") %>%
-      dplyr::select(transcript_id, orf_info)
+      #tidyr::separate(V4, into = c("transcript_id", "orf_info"), sep = ":") %>%
+      #dplyr::select(transcript_id, orf_info)
+      dplyr::select(transcript_id = V1) %>%
+      dplyr::mutate(transcript_id = stringr::str_remove(transcript_id, "\\.p\\d+$"))
   }
   
   # Process BLASTp results
@@ -477,7 +509,8 @@ if (any_functional_data_exists) {
                                   "mismatches", "gap_opens", "query_start", "query_end",
                                   "subject_start", "subject_end", "evalue", "bit_score")
     uniprot_blastp <- uniprot_blastp %>%
-      mutate(transcript_id = stringr::str_replace(transcript_id, "^((?:[^.]+\\.){2}[^.]+).*", "\\1"))
+      #mutate(transcript_id = stringr::str_replace(transcript_id, "^((?:[^.]+\\.){2}[^.]+).*", "\\1"))
+      dplyr::mutate(transcript_id = stringr::str_remove(transcript_id, "\\.p\\d+$"))
   }
   
   # Process BLASTx results
@@ -491,7 +524,7 @@ if (any_functional_data_exists) {
   pfam_df <- as.data.frame(pfam)
   if (nrow(pfam_df) > 0) {
     pfam_df <- pfam_df %>%
-      mutate(transcript_id = stringr::str_replace(query_name, "^((?:[^.]+\\.){2}[^.]+).*", "\\1"))
+      mutate(transcript_id = stringr::str_replace(query_name, "\\.p\\d+$"))
   }
   
   # Process Interproscan results
@@ -500,7 +533,7 @@ if (any_functional_data_exists) {
                                 "signature_accession", "description", "query_start", "query_end",
                                 "evalue", "status", "date", "interpro_accession","interpro_description","GO","pathways")
     interproscan <- interproscan %>%
-      mutate(transcript_id = stringr::str_replace(transcript_id, "^((?:[^.]+\\.){2}[^.]+).*", "\\1"))
+      mutate(transcript_id = stringr::str_replace(transcript_id, "\\.p\\d+$"))
   }
   
   #Filter Pfam data
@@ -606,18 +639,18 @@ if (any_functional_data_exists) {
       dplyr::summarize(all_pathways = paste(unique(pathway_name_clean), collapse = ", "), .groups = 'drop') %>% 
       dplyr::left_join(gene_trans, by = "transcript_id")
     
-    # If InterProScan was not run, the reactome object will not exist
-    if (!exists("reactome_results_combined")) {
-      message("No InterProScan/Reactome data found. Creating empty placeholder for pathway analysis.")
-      reactome_results_combined <- data.frame(
-        transcript_id = character(0),
-        all_pathways = character(0),
-        gene_id = character(0),
-        stringsAsFactors = FALSE
-      )
-    }
+    
   }
-  
+  # If InterProScan was not run, the reactome object will not exist
+  if (!exists("reactome_results_combined")) {
+    message("No InterProScan/Reactome data found. Creating empty placeholder for pathway analysis.")
+    reactome_results_combined <- data.frame(
+      transcript_id = character(0),
+      all_pathways = character(0),
+      gene_id = character(0),
+      stringsAsFactors = FALSE
+    )
+  }
   # Get best hits
   best_blastp <- if (nrow(signif_blastp) > 0) {
     signif_blastp %>%
@@ -675,20 +708,20 @@ if (any_functional_data_exists) {
   interpro_GOs <- interpro_GOs[interpro_GOs$GO != "-",] %>% dplyr::group_by(transcript_id) %>%
     dplyr::summarize(all_GOs = paste(unique(GO), collapse = ", "), .groups = 'drop') %>% dplyr::left_join(gene_trans, by = "transcript_id")
   #interpro_pathways <- if (nrow(interproscan_filtered) > 0) interproscan_filtered %>% dplyr::select(transcript_id, hit = pathways) else data.frame(transcript_id=character(), hit=character())
-
+  
   all_hits_combined <- dplyr::bind_rows(pfam_hits, blastx_hits, blastp_hits, interpro_hits) %>%
     dplyr::filter(!is.na(hit) & hit != "") %>%
     dplyr::group_by(transcript_id) %>%
     dplyr::summarize(all_hits = paste(unique(hit), collapse = ", "), .groups = 'drop') %>%
     dplyr::left_join(interpro_GOs[,-3], by = "transcript_id") %>%
     dplyr::left_join(reactome_results_combined[,-3], by = "transcript_id") 
-    #dplyr::summarize(all_pathways = paste(unique(all_hits), collapse = ", "), .groups = 'drop')
+  #dplyr::summarize(all_pathways = paste(unique(all_hits), collapse = ", "), .groups = 'drop')
   
   
   # Merge the all_hits_combined with transcripts
   transcripts_with_hits <- transcripts %>%
     dplyr::left_join(all_hits_combined, by = "transcript_id")
-    
+  
   interpro_GOs_genes <- interpro_GOs %>%
     dplyr::group_by(gene_id) %>%
     dplyr::summarize(all_GOs = paste(unique(all_GOs), collapse = ", "), .groups = 'drop')
@@ -824,9 +857,9 @@ check_all_transcripts_overlap <- function(gene_exons_gr) {
   # Create a list of GRanges for each transcript
   transcript_list <- split(gene_exons_gr, mcols(gene_exons_gr)$transcript_id)
   # Convert to GRangesList
-  transcript_grl <- GRangesList(transcript_list)
+  transcript_grl <- GenomicRanges::GRangesList(transcript_list)
   # Find overlaps within the GRangesList
-  overlaps <- rtracklayer::findOverlaps(transcript_grl, transcript_grl)
+  overlaps <- GenomicRanges::findOverlaps(transcript_grl, transcript_grl)
   # Remove self-overlaps
   overlaps <- overlaps[queryHits(overlaps) != subjectHits(overlaps)]
   # Create a list where each transcript maps to the transcripts it overlaps with
@@ -1169,7 +1202,7 @@ compute_common_entries_all <- function(entries_list) {
     # Remove NA and empty strings
     x <- x[!is.na(x) & x != ""]
     # Trim whitespace
-    x <- stringr::tr_trim(x)
+    x <- stringr::str_trim(x)
     # Return unique entries within the transcript
     unique(x)
   })
@@ -1285,13 +1318,13 @@ functional_transcripts_updated <- functional_transcripts_updated %>%
 # Convert to data frame for final manipulation with dplyr
 final_df <- as.data.frame(functional_transcripts_updated)
 
-# Clean up feature types and generate informative IDs 
+# --- Clean up feature types and generate informative IDs ---
 final_df_cleaned <- final_df %>%
-  # Remove redundant 'transcript' rows with generic IDs
+  # 1. Remove redundant 'transcript' rows with generic IDs
   dplyr::filter(!(type == "transcript" & grepl("^nbis-transcript-", ID))) %>%
-  # Standardize all transcript-level features ('RNA', 'mRNA') to 'transcript'
+  # 2. Standardize all transcript-level features ('RNA', 'mRNA') to 'transcript'
   dplyr::mutate(type = if_else(type %in% c("RNA", "mRNA"), "transcript", type)) %>%
-  # Generate clean, hierarchical IDs
+  # 3. Generate clean, hierarchical IDs
   dplyr::group_by(transcript_id) %>%
   dplyr::mutate(
     ID = case_when(
@@ -1304,7 +1337,7 @@ final_df_cleaned <- final_df %>%
   ) %>%
   dplyr::ungroup()
 
-# Remove functional annotations from all sub-features 
+# --- Remove functional annotations from all sub-features ---
 annotation_cols <- c("best_SwissProt_blastp_hit", "best_SwissProt_blastx_hit", 
                      "best_Pfam_hit", "best_InterPro_hit", "all_hits", "has_ORF", 
                      "all_GOs", "all_pathways")
@@ -1317,7 +1350,7 @@ final_df_cleaned <- final_df_cleaned %>%
   dplyr::mutate(across(all_of(cols_to_clean), ~if_else(type %in% sub_feature_types, NA, .)))
 
 
-# Convert back to GRanges and export
+# --- Convert back to GRanges and Export ---
 final_granges_for_export <- GenomicRanges::makeGRangesFromDataFrame(
   final_df_cleaned,
   keep.extra.columns = TRUE,
