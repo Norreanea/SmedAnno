@@ -74,6 +74,10 @@ nano ~/.docker/daemon.json
 
 6. Restart Docker Desktop. Docker will now store all its images, containers, and volumes in the new location. You can now safely run the build commands.
 
+OR
+
+You can set it in the Desktop UI’s “Resources → Advanced → Disk image location”.
+
 ## Usage
 All pipeline runs are initiated through the *run_smedanno.sh* wrapper script. This script automatically handles mounting your local data directories into the Docker container:
 ```bash
