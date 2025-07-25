@@ -1,9 +1,16 @@
 name: smedanno
 channels:
+  - nvidia       
+  - pytorch     
   - conda-forge
   - bioconda
 dependencies:
   - python=3.10
+  - biopython=1.83                 
+  - pytorch=2.3.*
+  - pytorch-cuda=12.1
+  - torchvision
+  - torchaudio           
   - samtools=1.15.1
   - star=2.7.10a
   - gffcompare=0.12.6
