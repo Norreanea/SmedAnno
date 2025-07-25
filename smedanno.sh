@@ -92,18 +92,25 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		echo "  --steps LIST                  Comma-separated list of steps to run (0-10)"
 		echo "  --all                         Run all steps sequentially"
 		echo "  --functionalMethods METHODS   Comma-separated list of functional annotation methods to apply (BLASTp,BLASTx,PFAM,INTERPRO; default: BLASTp,BLASTx,PFAM,INTERPRO)"
+		echo "  --noFunctionalPrediction      Skip functional prediction, disable BLAST/PFAM/InterPro"
 		echo "  --stringtie VERSION               Set stringtie version for both short and mix reads (if not using individual overrides)"
 		echo "  --stringtie_short VERSION         Set stringtie version for short reads (default: 2.1.1)"
 		echo "  --stringtie_mix VERSION           Set stringtie version for mixed reads (default: 2.2.1)"
 		echo "  --trimQual N                 TrimGalore quality cutoff (Phred, default 20)"
 		echo "  --trimAdapter SEQ            Adapter sequence to remove               (default: auto-detection)"
-		echo "  --trimGzip                   Gzip-compress trimmed FASTQ              (TRUE/FALSE)"
+		echo "  --trimGzip                   Gzip-compress trimmed FASTQ              (default: FALSE)"
 		echo "  --trimLen N                  Minimum read length after trimming       (default: 20 bp.)"
+		echo "  --deepSpliceSpecies SPECIES   Enable DeepSplice splice-site guidance with one of:"
+		echo_green "Available DeepSplice species:"
+        echo "                                human, mouse, zebrafish, honeybee, thalecress"
+        echo "                               (Use the closest taxon; splice motifs are highly conserved, e.g. honey-bee works for most non-model metazoans)"
+		echo "  --deepSpliceThr FLOAT         Posterior cutoff passed to DeepSplice (default: 0.65)"
+        echo "  --noDeepSplice                Skip DeepSplice (default behaviour)"
 		echo "  --genomeType <type>           Specify the type of genome being processed. Options: 'nuclear', 'mito', 'mixed'."
 		echo "                                If not set, the script will auto-detect 'mixed' if headers match --mitoPattern."
 		echo "                                default: 'nuclear'."
 		echo "  --mitoPattern <regex>         Regular expression to identify mitochondrial headers for 'mixed' mode."
-		echo "                                default: '[Mm]ito|[Mm]tDNA'."
+		echo "                                Default: '[Mm]ito|[Mm]tDNA'."
 		echo "  --geneticCodeNucl <code>      Genetic code for nuclear transcripts. Default: 'Universal'."
 		echo "  --geneticCodeMito <code>      Genetic code for mitochondrial transcripts. Default: 'Mitochondrial-Vertebrates'."
 		echo ""
@@ -399,6 +406,16 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 			echo_red "Please use one of the valid mitochondrial codes. See --help."
 			show_help
 		fi
+
+        # DeepSplice validation (only if enabled)
+		if [[ "${DEEPSPLICE}" == true ]]; then
+			local valid_deepsplice_sp=("human" "mouse" "zebrafish" "honeybee" "thalecress")
+			if ! contains "${DEEPSPLICE_SPECIES}" "${valid_deepsplice_sp[@]}"; then
+				echo_red "Error: Invalid --deepSpliceSpecies '${DEEPSPLICE_SPECIES}'."
+				echo_red "Please use one of the valid DeepSplice species. See --help."
+				show_help
+			fi
+		fi
         # Validation of parameters with default values
 		is_positive_integer "${THREADS}" || { echo_red "Error: --threads must be a positive integer."; show_help; }
 		is_positive_integer "${MIN_ORF_LENGTH}" || { echo_red "Error: --minOrfLength must be a positive integer."; show_help; }
@@ -423,6 +440,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		[[ "${BLAST_IDENTITY}" -lt 0 || "${BLAST_IDENTITY}" -gt 100 ]] && { echo_red "Error: --blastIdentity must be between 0 and 100."; show_help; }
 		is_positive_integer "${PFAM_COVERAGE}" || { echo_red "Error: --pfamCoverage must be a positive integer."; show_help; }
 		[[ "${PFAM_COVERAGE}" -lt 0 || "${PFAM_COVERAGE}" -gt 100 ]] && { echo_red "Error: --pfamCoverage must be between 0 and 100."; show_help; }
+		is_positive_float "${DEEPSPLICE_THR}" || { echo_red "Error: --deepSpliceThr must be a positive number."; show_help; }
+		[[ "${DEEPSPLICE_THR}" -lt 0 || "${DEEPSPLICE_THR}" -gt 1 ]] && { echo_red "Error: --deepSpliceThr must be between 0 and 1."; show_help; }
 		
 		# Conditionally validate optional parameters that have no default value
 		if [ -n "${LONGREAD_TARGET_BASES}" ]; then
@@ -715,94 +734,163 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	# ---------------------------
 	step3_gene_transcript_assembly() {
 		echo_blue  "Starting Step 3: Gene and Transcript Assembly"
+		
+		# Generate splice guides directly from RNA-seq alignments ---
+		echo_green "Generating splice-site guide from your alignment (BAM) data..."
 
-		# Use the user-provided alignDirs if available, otherwise use the internal ones
+		# Define paths for user-provided or internally generated alignment directories
 		local current_align_dir_short=${ALIGN_DIR_SHORT:-$ALIGN_DIR_SHORT_INTERNAL}
 		local current_align_dir_mix=${ALIGN_DIR_MIX:-$ALIGN_DIR_MIX_INTERNAL}
+		local temp_bam_dir="${ASSEMBLY_DIR}/temp_bams_with_xs"
+        mkdir -p "${temp_bam_dir}"
+
+		echo_green "Verifying and adding XS strand tags to all input BAMs before processing..."
+
+		# Create new lists to hold paths to BAMs that are guaranteed to have the XS tag
+		local corrected_short_bams=()
+		local corrected_mix_bams=()
+
+		# Process short-only samples to check/add XS tags
+		for bam_filename in "${SHORT_ONLY_SAMPLES[@]}"; do
+			local input_bam="${current_align_dir_short}/${bam_filename}"
+			if [ ! -f "${input_bam}" ]; then
+				echo_red "BAM file not found: ${input_bam}. Skipping."
+				continue
+			fi
+
+			# Check for the XS tag. If it exists, use the original file.
+			# If not, create a new temporary file with the tag and use that.
+			if samtools view "${input_bam}" 2>/dev/null | head -n 100 | grep -q 'XS:A:'; then
+				corrected_short_bams+=("${input_bam}")
+			else
+				echo_yellow "Adding XS tag to ${bam_filename}..."
+				local sample_name; sample_name=$(basename "${bam_filename}" .bam)
+				local corrected_bam_path="${temp_bam_dir}/${sample_name}_withXS.bam"
+				samtools view -h "${input_bam}" | gawk -v strType=2 -f ./tagXSstrandedData.awk | samtools view -bS - > "${corrected_bam_path}"
+				TEMP_FILES+=("${corrected_bam_path}") # Ensure cleanup on exit
+				corrected_short_bams+=("${corrected_bam_path}")
+			fi
+		done
+
+		# Process short-read BAMs from mixed samples to check/add XS tags
+		for bam_filename in "${MIX_SAMPLES[@]}"; do
+			local input_bam="${current_align_dir_mix}/${bam_filename}"
+			if [ ! -f "${input_bam}" ]; then
+				echo_red "Mixed-mode short-read BAM not found: ${input_bam}. Skipping."
+				continue
+			fi
+			
+			if samtools view "${input_bam}" 2>/dev/null | head -n 100 | grep -q 'XS:A:'; then
+				corrected_mix_bams+=("${input_bam}")
+			else
+				echo_yellow "Adding XS tag to ${bam_filename}..."
+				local sample_name; sample_name=$(basename "${bam_filename}" .bam | sed -E 's/(_STAR_Aligned\.sortedByCoord\.outXS|_STAR_Aligned\.sortedByCoord\.out)//')
+				local corrected_bam_path="${temp_bam_dir}/${sample_name}_withXS.bam"
+				samtools view -h "${input_bam}" | gawk -v strType=2 -f ./tagXSstrandedData.awk | samtools view -bS - > "${corrected_bam_path}"
+				TEMP_FILES+=("${corrected_bam_path}")
+				corrected_mix_bams+=("${corrected_bam_path}")
+			fi
+		done
+
+		# Generate splice guides from ALL corrected BAMs
+		local all_corrected_bams=("${corrected_short_bams[@]}" "${corrected_mix_bams[@]}")
+		local JUNCTION_GTF="${ASSEMBLY_DIR}/junctions_from_bams.gtf"
 		
-		# Create a temporary, writable directory inside the output folder for modified BAMs
-	    local temp_bam_dir="${ASSEMBLY_DIR}/temp_bams_with_xs"
-	    mkdir -p "${temp_bam_dir}"
-		# Process short-only samples
-		if [ "${#SHORT_ONLY_SAMPLES[@]}" -gt 0 ]; then
-			for BAM_FILENAME in "${SHORT_ONLY_SAMPLES[@]}"; do
-				# Generic sample name parsing
-				local SAMPLE; SAMPLE=$(echo "${BAM_FILENAME}" | sed 's/\.bam$//')
-				echo_green "Processing sample: \"${SAMPLE}\" (from ${BAM_FILENAME})"
-				local INPUT_BAM="${current_align_dir_short}/${BAM_FILENAME}"
-				[ ! -f "${INPUT_BAM}" ] && { echo_red "BAM file not found: ${INPUT_BAM}. Skipping."; continue; }
+		if [ ${#all_corrected_bams[@]} -gt 0 ]; then
+			echo_green "Creating and indexing a temporary merged BAM for junction extraction..."
+			local temp_merged_bam="${temp_bam_dir}/merged_for_junctions.bam"
+			TEMP_FILES+=("${temp_merged_bam}" "${temp_merged_bam}.bai") # Ensure cleanup on exit
 
-				# Conditionally add XS tag if not present
-				local BAM_FOR_ASSEMBLY
-				if samtools view "${INPUT_BAM}" 2>/dev/null | head -n 100 | grep -q 'XS:A:'; then
-					echo_green "XS tag found in ${BAM_FILENAME}. Using it directly for assembly."
-					BAM_FOR_ASSEMBLY="${INPUT_BAM}"
-				else
-					echo_yellow "Warning: XS tag for strand information not found in ${BAM_FILENAME}."
-					echo_yellow "Adding XS tag based on a strandedness value of '2' (fr-firstrand). A new temporary BAM will be created."
-					BAM_FOR_ASSEMBLY="${temp_bam_dir}/${SAMPLE}_withXS.bam"
-					TEMP_FILES+=("${BAM_FOR_ASSEMBLY}") # Ensure file is cleaned up on exit
-					
-					samtools view -h "${INPUT_BAM}" | \
-						gawk -v strType=2 -f ./tagXSstrandedData.awk | \
-						samtools view -bSq 10 -F 4 - > "${BAM_FOR_ASSEMBLY}"
-				fi
-				
-				echo_green "Assembling transcripts for sample: \"${SAMPLE}\""
+			# Create the merged, sorted, and indexed BAM file
+			samtools merge -f -@ "${THREADS}" "${temp_merged_bam}" "${all_corrected_bams[@]}"
+			samtools index -@ "${THREADS}" "${temp_merged_bam}"
 
-				if [ -n "${GENOME_GTF}" ]; then
-					echo_green "Running StringTie2 for reference-based assembly (RB, SR)"
-					conda run -n ${ENV_SHORT} stringtie -p "${THREADS}" -G "${GENOME_GTF}" -c "${STRINGTIE2_COVERAGE}" -f "${STRINGTIE2_ABUNDANCE}" -o "${SR_RB_GTF_DIR_INTERNAL}/${SAMPLE}_SR_RB.gtf" "${BAM_FOR_ASSEMBLY}"
-				fi
-
-				echo_green "Running StringTie2 for de novo assembly (DN, SR)"
-				conda run -n ${ENV_SHORT} stringtie -p "${THREADS}" -c "${STRINGTIE2_COVERAGE}" -f "${STRINGTIE2_ABUNDANCE}" -o "${SR_DN_GTF_DIR_INTERNAL}/${SAMPLE}_SR_DN.gtf" "${BAM_FOR_ASSEMBLY}"
-			done
+			echo_green "Extracting splice junctions from the prepared merged BAM..."
+			regtools junctions extract -a 8 -m 50 -M 500000 -s XS "${temp_merged_bam}" | \
+				awk 'BEGIN{OFS="\t"} $5 >= 3 {
+					chrom=$1; start=$2; end=$3; strand=$6;
+					id="JUNC_"NR;
+					gq="\042"; # Use octal code for a double quote to avoid shell issues
+					attrs="gene_id " gq id gq "; transcript_id " gq id gq ";";
+					exon1_attrs = attrs " exon_number " gq "1" gq ";";
+					exon2_attrs = attrs " exon_number " gq "2" gq ";";
+					printf "%s\tSmedAnno\ttranscript\t%d\t%d\t.\t%s\t.\t%s\n", chrom, start, end, strand, attrs;
+					printf "%s\tSmedAnno\texon\t%d\t%d\t.\t%s\t.\t%s\n", chrom, start, start, strand, exon1_attrs;
+					printf "%s\tSmedAnno\texon\t%d\t%d\t.\t%s\t.\t%s\n", chrom, end, end, strand, exon2_attrs;
+				}' > "${JUNCTION_GTF}"
 		fi
 
-		# Process mixed samples
-		if [ "${#MIX_SAMPLES[@]}" -gt 0 ]; then
-					for SHORT_BAM_FILENAME in "${MIX_SAMPLES[@]}"; do
-						# 1. Parse a clean sample name from the short-read BAM filename
-						# This regex handles the pipeline's own output and raw STAR output
-						local SAMPLE; SAMPLE=$(echo "${SHORT_BAM_FILENAME}" | sed -E 's/(_STAR_Aligned\.sortedByCoord\.outXS|_Aligned\.sortedByCoord\.out)?\.bam$//')
-						
-						echo_green "Processing mixed-read sample: \"${SAMPLE}\" (from ${SHORT_BAM_FILENAME})"
+		# Run optional ab initio splice predictors 
+		local DS_GUIDE_GTF="${ASSEMBLY_DIR}/splice_guides_deepsplice.gtf"
+		if [[ "${DEEPSPLICE}" == true ]]; then
+			echo_green "Running DeepSplice to generate splice-site guide…"
+			local DS_GUIDE_GFF="${ASSEMBLY_DIR}/splice_guides_raw.gff3"
+			python3 "$(dirname "$0")/deepsplice.py" --weights "${DSMODEL_DIR}/model_${DEEPSPLICE_SPECIES}.pt" --thr "${DEEPSPLICE_THR}" -o "${DS_GUIDE_GFF}" "${GENOME_REF}"
+			gawk -F'\t' '$3=="donor"||$3=="acceptor" {id="DS_"NR; printf "%s\tDeepSplice\texon\t%s\t%s\t%s\t.\t%s\tgene_id \"%s\"; transcript_id \"%s\";\n", $1,$4,$5,$6,$8,id,id}' "${DS_GUIDE_GFF}" > "${DS_GUIDE_GTF}"
+		fi
 
-						# 2. Define path to the input short-read BAM and check existence
-						local SHORT_INPUT_BAM="${current_align_dir_mix}/${SHORT_BAM_FILENAME}"
-						[ ! -f "${SHORT_INPUT_BAM}" ] && { echo_red "Short-read BAM not found: ${SHORT_INPUT_BAM}. Skipping."; continue; }
+		# Merge all available splice guides
+		echo_green "Combining all available splice evidence..."
+		local guides_to_merge=()
+		[ -s "${JUNCTION_GTF}" ] && guides_to_merge+=("${JUNCTION_GTF}")
+		[ -s "${DS_GUIDE_GTF}" ]  && guides_to_merge+=("${DS_GUIDE_GTF}")
+		
+		local FINAL_GUIDE_GTF=""
+		local GUIDE_OPT=""
 
-						# 3. Conditionally add XS tag to the short-read BAM
-						local SHORT_BAM_FOR_ASSEMBLY
-						if samtools view "${SHORT_INPUT_BAM}" 2>/dev/null | head -n 100 | grep -q 'XS:A:'; then
-							echo_green "XS tag found in ${SHORT_BAM_FILENAME}."
-							SHORT_BAM_FOR_ASSEMBLY="${SHORT_INPUT_BAM}"
-						else
-							echo_yellow "Warning: XS tag not found in ${SHORT_BAM_FILENAME}. Adding it now."
-							SHORT_BAM_FOR_ASSEMBLY="${temp_bam_dir}/${SAMPLE}_short_withXS.bam"
-							TEMP_FILES+=("${SHORT_BAM_FOR_ASSEMBLY}")
-							
-							samtools view -h "${SHORT_INPUT_BAM}" | \
-								gawk -v strType=2 -f ./tagXSstrandedData.awk | \
-								samtools view -bSq 10 -F 4 - > "${SHORT_BAM_FOR_ASSEMBLY}"
-						fi
+		if [ ${#guides_to_merge[@]} -gt 1 ]; then
+			echo_green "Merging ${#guides_to_merge[@]} sources of splice evidence..."
+			FINAL_GUIDE_GTF="${ASSEMBLY_DIR}/splice_guides_merged.gtf"
+			cat "${guides_to_merge[@]}" | \
+				awk '$3=="exon"{print $1,$4,$5,$7}' OFS='\t' | \
+				sort -u | \
+				awk 'BEGIN{OFS="\t"}{id="GUIDE_"NR; print $1,"Merged","exon",$2,$3,".",".",$4,"gene_id \""id"\"; transcript_id \""id"\";"}' \
+				> "${FINAL_GUIDE_GTF}"
+		elif [ ${#guides_to_merge[@]} -eq 1 ]; then
+			echo_green "Using a single source of splice evidence: ${guides_to_merge[0]}"
+			FINAL_GUIDE_GTF="${guides_to_merge[0]}"
+		fi
 
-						# 4. Find the corresponding long-read BAM by convention
-						local LONG_BAM_FOR_ASSEMBLY="${current_align_dir_mix}/${SAMPLE}_long_aligned.bam"
-						[ ! -f "${LONG_BAM_FOR_ASSEMBLY}" ] && { echo_red "Long-read BAM not found for sample ${SAMPLE} at ${LONG_BAM_FOR_ASSEMBLY}. Skipping."; continue; }
+		if [ -n "${FINAL_GUIDE_GTF}" ]; then
+			GUIDE_OPT="-G ${FINAL_GUIDE_GTF}"
+			echo_green "Final guide for StringTie is ready."
+		else
+			echo_yellow "Warning: No splice guides were generated. Proceeding with unguided assembly."
+		fi
 
-						echo_green "Assembling transcripts for mixed-read sample: \"${SAMPLE}\""
 
-						if [ -n "${GENOME_GTF}" ]; then
-							echo_green "Running StringTie2 for reference-based assembly (RB, MR)"
-							conda run -n ${ENV_MIX} stringtie --mix -p "${THREADS}" -G "${GENOME_GTF}" -c "${STRINGTIE2_COVERAGE}" -f "${STRINGTIE2_ABUNDANCE}" -o "${MR_RB_GTF_DIR_INTERNAL}/${SAMPLE}_MR_RB.gtf" "${SHORT_BAM_FOR_ASSEMBLY}" "${LONG_BAM_FOR_ASSEMBLY}"
-						fi
+		# Assemble final option for StringTie
+		#[[ -n "${GUIDE_GTF}" ]] && GUIDE_OPT="-G ${GUIDE_GTF}" || GUIDE_OPT=""
+		
+		# Assemble short-read only samples
+		for bam_for_assembly in "${corrected_short_bams[@]}"; do
+			local sample; sample=$(basename "${bam_for_assembly}" | sed -E 's/(_withXS)?\.bam$//')
+			echo_green "Assembling transcripts for sample: \"${sample}\""
+			if [ -n "${GENOME_GTF}" ]; then
+				echo_green "Running StringTie for reference-based assembly (RB, SR)"
+				conda run -n ${ENV_SHORT} stringtie -p "${THREADS}" -G "${GENOME_GTF}" -c "${STRINGTIE2_COVERAGE}" -f "${STRINGTIE2_ABUNDANCE}" -o "${SR_RB_GTF_DIR_INTERNAL}/${sample}_SR_RB.gtf" "${bam_for_assembly}"
+			fi
+			echo_green "Running StringTie for de novo assembly (DN, SR)"
+			conda run -n ${ENV_SHORT} stringtie -p "${THREADS}" ${GUIDE_OPT} -c "${STRINGTIE2_COVERAGE}" -f "${STRINGTIE2_ABUNDANCE}" -o "${SR_DN_GTF_DIR_INTERNAL}/${sample}_SR_DN.gtf" "${bam_for_assembly}"
+		done
 
-						echo_green "Running StringTie2 for de novo assembly (DN, MR)"
-						conda run -n ${ENV_MIX} stringtie --mix -p "${THREADS}" -c "${STRINGTIE2_COVERAGE}" -f "${STRINGTIE2_ABUNDANCE}" -o "${MR_DN_GTF_DIR_INTERNAL}/${SAMPLE}_MR_DN.gtf" "${SHORT_BAM_FOR_ASSEMBLY}" "${LONG_BAM_FOR_ASSEMBLY}"
-					done
-				fi
+		# Assemble mixed-read samples
+		for short_bam_for_assembly in "${corrected_mix_bams[@]}"; do
+			local sample; sample=$(basename "${short_bam_for_assembly}" | sed -E 's/(_STAR_Aligned\.sortedByCoord\.outXS|_withXS)?\.bam$//')
+			local long_bam_for_assembly="${current_align_dir_mix}/${sample}_long_aligned.bam"
+			if [ ! -f "${long_bam_for_assembly}" ]; then
+				echo_red "Long-read BAM not found for sample ${sample} at ${long_bam_for_assembly}. Skipping assembly."
+				continue
+			fi
+
+			echo_green "Assembling transcripts for mixed-read sample: \"${sample}\""
+			if [ -n "${GENOME_GTF}" ]; then
+				echo_green "Running StringTie for reference-based assembly (RB, MR)"
+				conda run -n ${ENV_MIX} stringtie --mix -p "${THREADS}" -G "${GENOME_GTF}" -c "${STRINGTIE2_COVERAGE}" -f "${STRINGTIE2_ABUNDANCE}" -o "${MR_RB_GTF_DIR_INTERNAL}/${sample}_MR_RB.gtf" "${short_bam_for_assembly}" "${long_bam_for_assembly}"
+			fi
+			echo_green "Running StringTie for de novo assembly (DN, MR)"
+			conda run -n ${ENV_MIX} stringtie --mix -p "${THREADS}" ${GUIDE_OPT} -c "${STRINGTIE2_COVERAGE}" -f "${STRINGTIE2_ABUNDANCE}" -o "${MR_DN_GTF_DIR_INTERNAL}/${sample}_MR_DN.gtf" "${short_bam_for_assembly}" "${long_bam_for_assembly}"
+		done
 		echo_blue  "Step 3 Completed: Gene and Transcript Assembly"
 	}
 
@@ -1080,6 +1168,10 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		else
 			echo_yellow "Skipping peptide consolidation, clean file exists."
 		fi
+		if $NO_FUNCTIONAL; then
+			echo_yellow "[--noFunctionalPrediction] – skipping BLAST / Pfam / InterPro."
+			FUNCTIONAL_METHODS=""
+		fi
 
 		# Download databases if needed
 		if [[ "$FUNCTIONAL_METHODS" =~ BLAST ]]; then
@@ -1218,6 +1310,14 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	MAX_TRANSCRIPT_LENGTH=100000
 	TRIM_QUAL=20
 	TRIM_LEN=20
+	DEEPSPLICE=false
+	DEEPSPLICE_SPECIES=""
+    DEEPSPLICE_THR=0.65	
+    DSMODEL_DIR="$(dirname "$0")/DSmodels"
+    #DEEPSPLICE_WEIGHTS=""
+    SPLICE_ID_PREFIX=""
+    GUIDE_OPT=""    
+    NO_FUNCTIONAL=false	
 	MAX_DISTANCE=1000
 	LARGE_INTRON_THRESHOLD=100000
 	BLAST_EVALUE="1e-5"
@@ -1260,6 +1360,10 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 			--MR_RB_gtf_dir) MR_RB_GTF_DIR="$2"; shift 2 ;;
 			--MR_DN_gtf_dir) MR_DN_GTF_DIR="$2"; shift 2 ;;
 			--blastDB_SwissProt) BLAST_DB_SwissProt="$2"; shift 2 ;;
+			--deepSpliceSpecies) DEEPSPLICE=true; DEEPSPLICE_SPECIES="$2"; shift 2 ;;
+			--noDeepSplice) DEEPSPLICE=false; shift ;;
+			--deepSpliceThr) DEEPSPLICE_THR="$2"; shift 2 ;;
+			--noFunctionalPrediction) NO_FUNCTIONAL=true; FUNCTIONAL_METHODS=""; shift ;;
 			--pfamDB) PFAM_DB="$2"; shift 2 ;;
 			--genomeType) GENOME_TYPE_USER="$2"; shift 2;;
 			--mitoPattern) MITO_PATTERN="$2"; shift 2;;
@@ -1491,32 +1595,12 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		fi
 	fi
 
-	# for STEP in "${STEP_ORDER[@]}"; do
-		# if contains "$STEP" "${STEPS_TO_RUN[@]}"; then
-			# # --- Conditional Validation ---
-			# case "$STEP" in
-				# 0|1|2)
-					# [ -z "${DATA_DIR}" ] && { echo_red "Error: --dataDir is required for Step ${STEP}."; exit 1; }
-					# [ ! -d "${DATA_DIR}/short_reads" ] && [ ! -d "${DATA_DIR}/mix_reads" ] && { echo_red "Error: --dataDir must contain 'short_reads' and/or 'mix_reads'."; exit 1; }
-					# ;;
-				# 3)
-					# [ -z "${ALIGN_DIR}" ] && [ ! -d "${ALIGN_DIR_INTERNAL}" ] && { echo_red "Error: --alignDir must be provided for Step 3 if not running from Step 2."; exit 1; }
-					# ;;
-				# 4|5|6)
-				    # [ -z "${SR_RB_GTF_DIR}" ] && [ -z "${SR_DN_GTF_DIR}" ] && [ -z "${MR_RB_GTF_DIR}" ] && [ -z "${MR_DN_GTF_DIR}" ] && [ ! -d "${SR_RB_GTF_DIR_INTERNAL}" ] && [ ! -d "${SR_DN_GTF_DIR_INTERNAL}" ] && [ ! -d "${MR_RB_GTF_DIR_INTERNAL}" ] && [ ! -d "${MR_DN_GTF_DIR_INTERNAL}" ] && { echo_red "Error: GTF directories not found for merging steps."; exit 1; }
-					# ;;
-				# 7|8|9|10)
-					# [ -z "${GENOME_REF}" ] && { echo_red "Error: --genomeRef must be provided for annotation steps (7-10)."; exit 1; }
-					# ;;
-			# esac
+	if [ -f "${GENOME_REF}.fai" ]; then
+		mkdir -p "${GENOME_DIR:-$OUTPUT_DIR/genome}"
+		mv "${GENOME_REF}.fai" "${GENOME_DIR:-$OUTPUT_DIR/genome}/"
+	fi
+    [ -f ./Log.out ] && mv ./Log.out "${LOGS_DIR}/"
 
-			# # --- Execute Step ---
-			# STEP_FUNCTION="${STEP_FUNCTIONS[$STEP]}"
-			# echo_green "Executing Step $STEP: ${STEP_FUNCTION}"
-			# "${STEP_FUNCTION}"
-		# fi
-	# done
-	
 	# =====================================================================
 	# Pipeline Completed
 	# =====================================================================
