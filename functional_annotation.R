@@ -1323,16 +1323,12 @@ functional_transcripts_updated <- functional_transcripts_updated %>%
 # ---------------------------
 # Final GTF Formatting and Export
 # ---------------------------
-# In functional_annotation.R
-
-# ---------------------------
-# Final GTF Formatting and Export
-# ---------------------------
 
 # Convert to data frame for final manipulation with dplyr
 final_df <- as.data.frame(functional_transcripts_updated)
+final_df <- final_df[final_df$has_ORF==TRUE,] # Filter out transcripts without ORFs
 
-# --- Clean up feature types and generate informative IDs ---
+# Clean up feature types and generate informative IDs
 final_df_cleaned <- final_df %>%
   # 1. Remove redundant 'transcript' rows with generic IDs
   dplyr::filter(!(type == "transcript" & grepl("^nbis-transcript-", ID))) %>%
@@ -1351,7 +1347,7 @@ final_df_cleaned <- final_df %>%
   ) %>%
   dplyr::ungroup()
 
-# --- Remove functional annotations from all sub-features ---
+# Remove functional annotations from all sub-features
 annotation_cols <- c("best_SwissProt_blastp_hit", "best_SwissProt_blastx_hit", 
                      "best_Pfam_hit", "best_InterPro_hit", "all_hits", "has_ORF", 
                      "all_GOs", "all_pathways")
@@ -1364,7 +1360,7 @@ final_df_cleaned <- final_df_cleaned %>%
   dplyr::mutate(across(all_of(cols_to_clean), ~if_else(type %in% sub_feature_types, NA, .)))
 
 
-# --- Convert back to GRanges and Export ---
+# Convert back to GRanges and Export
 final_granges_for_export <- GenomicRanges::makeGRangesFromDataFrame(
   final_df_cleaned,
   keep.extra.columns = TRUE,
