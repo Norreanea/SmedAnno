@@ -20,6 +20,7 @@ SmedAnno is a robust and versatile RNA-Seq annotation pipeline designed to strea
 - **End-to-end analysis:** Covers all stages from read preprocessing and alignment to transcript assembly and functional annotation.
 - **Hybrid read support:** RNA-seq short reads (Illumina), long reads (PacBio/ONT), or a mix of both.
 - **Flexible assembly:** Performs both reference-based and de novo transcript assembly with StringTie.
+- **Splice-site guidance:** Automatically extracts splice junctions directly from alignment data (BAM files) to provide data-driven guidance for transcript assembly. Optionally, it can integrate *ab initio* predictions from DeepSplice for advanced splice site detection.
 - **Robust annotation:** Integrates results from TransDecoder, BLAST, HMMER (Pfam), and InterProScan to build a high-quality, functionally annotated gene set.
 - **Quality control:** The final step analyzes the annotation for structural and functional inconsistencies, flagging potentially fragmented or chimeric genes for manual review.
 - **Reproducible environment:** Packaged in a Docker container with all dependencies managed by Conda, ensuring maximum reproducibility.
@@ -117,6 +118,7 @@ All pipeline runs are initiated through the *run_smedanno.sh* wrapper script. Th
 		   --steps LIST                  Comma-separated list of steps to run (0-10)
 		   --all                         Run all steps sequentially
 		   --functionalMethods METHODS   Comma-separated list of functional annotation methods to apply (BLASTp,BLASTx,PFAM,INTERPRO; default: BLASTp,BLASTx,PFAM,INTERPRO)
+                   --noFunctionalPrediction      Skip functional prediction, disable BLAST/PFAM/InterPro
 		   --stringtie VERSION               Set stringtie version for both short and mix reads (if not using individual overrides)
 		   --stringtie_short VERSION         Set stringtie version for short reads (default: 2.1.1)
 		   --stringtie_mix VERSION           Set stringtie version for mixed reads (default: 2.2.1)
@@ -124,6 +126,12 @@ All pipeline runs are initiated through the *run_smedanno.sh* wrapper script. Th
 		   --trimAdapter SEQ            Adapter sequence to remove               (default: auto-detection)
 		   --trimGzip                   Gzip-compress trimmed FASTQ              (TRUE/FALSE)
 		   --trimLen N                  Minimum read length after trimming       (default: 20 bp.)
+		   --deepSpliceSpecies SPECIES   Enable DeepSplice splice-site guidance with one of:
+		                         Available DeepSplice species:
+                                         human, mouse, zebrafish, honeybee, thalecress
+                                        (Use the closest taxon; splice motifs are highly conserved, e.g. honey-bee works for most non-model metazoans)
+		   --deepSpliceThr FLOAT         Posterior cutoff passed to DeepSplice (default: 0.65)
+                   --noDeepSplice                Skip DeepSplice (default behaviour)
 		   --genomeType <type>           Specify the type of genome being processed. Options: 'nuclear', 'mito', 'mixed'.
 		                                 If not set, the script will auto-detect 'mixed' if headers match --mitoPattern.
 		                                 default: 'nuclear'.
@@ -206,6 +214,21 @@ Run only the functional annotation and quality control steps (9 and 10) on a GTF
     --threads 8 \
     --outputDir /path/to/your/output_directory
 ```
+**Example 4:** Full run with DeepSplice duidance.
+This example enables DeepSplice to supplement the default junction-based evidence. The ```honeybee``` model is often a good starting point for non-model invertebrates.
+```
+./run_smedanno.sh \
+    --all \
+    --dataDirShort /path/to/your/short_reads \
+    --genomeRef /path/to/your/genome.fa \
+    --threads 8 \
+    --mitoPattern mtDNA \
+    --geneticCodeMito Mitochondrial-Invertebrates \
+    --stringtie 3.0.0 \
+    --deepSpliceSpecies honeybee \
+    --deepSpliceThr 0.60 \
+    --outputDir /path/to/your/output_directory
+```
 **Full list of options.**
 For a complete list of all available options and their descriptions, run:
 ```
@@ -242,7 +265,7 @@ Upon successful execution, SmedAnno generates a structured output directory cont
 This project is licensed under the MIT License.
 
 ## Acknowledgements
-- **Bioinformatics tools:** SmedAnno integrates several powerful tools including Trim_Galore, Filtlong, STAR, minimap2, StringTie2, AGAT, TransDecoder, BLAST, PFAM,  InterPro and several R libraries
+- **Bioinformatics tools:** SmedAnno integrates several powerful tools including Trim_Galore, Filtlong, STAR, minimap2, DeepSplice, StringTie2, AGAT, TransDecoder, BLAST, PFAM,  InterPro and several R libraries
 - **Open-source community:** Special thanks to the developers and contributors of the open-source software utilized in this pipeline
   
 
