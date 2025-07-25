@@ -3,7 +3,13 @@
 set -e
 # This wrapper script dynamically creates volume mounts for any provided host path.
 
-# --- Correctly find and create the output directory ---
+# Auto-warn about trailing spaces after "\"
+if [[ -z ${_split_warned+x} ]] && [[ $BASH_COMMAND == *'\'*' '* ]]; then
+  echo -e "\e[1;33m[Warning] Back-slash followed by space detected …\e[0m"
+  _split_warned=1
+fi
+
+# Correctly find and create the output directory 
 HOST_OUTPUT_PATH=""
 ARGS=("$@") 
 for arg in "${ARGS[@]}"; do
@@ -12,7 +18,7 @@ for arg in "${ARGS[@]}"; do
         # Create a dummy .env file as docker-compose requires it,
         # but the path doesn't matter for a help request.
         echo "OUTPUT_PATH=/tmp/smedanno_dummy_output" > .env
-        docker-compose run --rm smedanno --help
+        docker-compose run --rm --gpus all smedanno --help
         rm .env # Clean up
         exit 0
     fi
@@ -25,7 +31,7 @@ for i in "${!ARGS[@]}"; do
             HOST_OUTPUT_PATH="${ARGS[$j]}"
             break 
         fi
-    elif [[ "${ARGS[$i]}" == --outputDir=* ]]; then
+    elif [[ "${ARGS[$i]}" == "--outputDir"* ]]; then
         HOST_OUTPUT_PATH="${ARGS[$i]#*=}"
         break
     fi
@@ -72,13 +78,13 @@ if [ ! -w "$HOST_OUTPUT_PATH" ]; then
     fi
 fi
 
-# --- Initialize variables for dynamic mounting ---
+# Initialize variables for dynamic mounting
 VOLUME_ARGS=""
 MOUNT_COUNTER=0
 declare -A DIR_MAP
 final_container_args=()
 
-# --- Main argument processing loop ---
+# Main argument processing loop
 i=0
 while [ $i -lt ${#ARGS[@]} ]; do
     arg="${ARGS[$i]}"
@@ -120,8 +126,10 @@ while [ $i -lt ${#ARGS[@]} ]; do
 
         *)
             final_container_args+=("$arg")
-            if [[ $i+1 -lt ${#ARGS[@]} ]] && ! [[ ${ARGS[$i+1]} =~ ^-- ]]; then
-                i=$((i + 1)); final_container_args+=("${ARGS[$i]}")
+			next=$((i + 1))
+            if [[ $next -lt ${#ARGS[@]} && ! ${ARGS[$next]} =~ ^-- ]]; then
+				i=$next
+				final_container_args+=("${ARGS[$i]}")
             fi
             ;;
     esac
@@ -133,7 +141,27 @@ echo "Creating dynamic .env file..."
 echo "OUTPUT_PATH=${HOST_OUTPUT_PATH}" > .env
 
 # Execute Docker Compose
-echo "Executing pipeline via docker-compose with dynamic mounts..."
-docker-compose run --rm ${VOLUME_ARGS} smedanno "${final_container_args[@]}"
+# --- GPU detection ------------------------------------------------------
+GPU=0
+if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+  GPU=1
+fi
+
+# --- choose backend -----------------------------------------------------
+if [ "$GPU" -eq 1 ]; then
+  echo "GPU detected → using docker *run* with --gpus all"
+  docker run --rm --gpus all --user root \
+    $VOLUME_ARGS \
+    -v "$HOST_OUTPUT_PATH":/output \
+    --workdir /smedanno \
+    smedanno "${final_container_args[@]}"
+else
+  echo "No GPU → falling back to docker‑compose (CPU)"
+  docker-compose run --rm -T --user root \
+    $VOLUME_ARGS \
+    -v "$HOST_OUTPUT_PATH":/output \
+    smedanno "${final_container_args[@]}"
+fi
+
 
 echo "Wrapper script finished."
