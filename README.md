@@ -92,7 +92,7 @@ All pipeline runs are initiated through the *run_smedanno.sh* wrapper script. Th
 		 Mandatory options for specific steps:
 		   --finalGTF PATH               Absolute path to final GTF file (optional, required for Functional Annotation only)
 		   --alignDirShort PATH          Absolute path to directory with ONLY short-read alignment BAM files (optional, required for Gene and Transcript Assembly only).
-	       --alignDirMix PATH            Absolute path to directory with mixed-read alignment BAM files (optional, required for Gene and Transcript Assembly only).
+	           --alignDirMix PATH            Absolute path to directory with mixed-read alignment BAM files (optional, required for Gene and Transcript Assembly only).
 		   --SR_RB_gtf_dir PATH          Directory containing SR_RB.gtf files (optional, required for Merging Assemblies)
 		   --SR_DN_gtf_dir PATH          Directory containing SR_DN.gtf files (optional, required for Merging Assemblies)
 		   --MR_RB_gtf_dir PATH          Directory containing MR_RB.gtf files (optional, required for Merging Assemblies)
@@ -127,7 +127,7 @@ All pipeline runs are initiated through the *run_smedanno.sh* wrapper script. Th
 		   --trimGzip                   Gzip-compress trimmed FASTQ              (TRUE/FALSE)
 		   --trimLen N                  Minimum read length after trimming       (default: 20 bp.)
 		   --deepSpliceSpecies SPECIES   Enable DeepSplice splice-site guidance with one of:
-		                         Available DeepSplice species:
+                 Available DeepSplice species:
                                          human, mouse, zebrafish, honeybee, thalecress
                                         (Use the closest taxon; splice motifs are highly conserved, e.g. honey-bee works for most non-model metazoans)
 		   --deepSpliceThr FLOAT         Posterior cutoff passed to DeepSplice (default: 0.65)
@@ -140,7 +140,7 @@ All pipeline runs are initiated through the *run_smedanno.sh* wrapper script. Th
 		   --geneticCodeNucl <code>      Genetic code for nuclear transcripts. Default: 'Universal'.
 		   --geneticCodeMito <code>      Genetic code for mitochondrial transcripts. Default: 'Mitochondrial-Vertebrates'.
 		 
-		_green Available genetic codes:
+                 Available genetic codes:
 		   Acetabularia, Candida, Ciliate, Dasycladacean, Euplotid, Hexamita, Mesodinium,
 		   Mitochondrial-Ascidian, Mitochondrial-Chlorophycean, Mitochondrial-Echinoderm, 
 		   Mitochondrial-Flatworm, Mitochondrial-Invertebrates,  Mitochondrial-Protozoan,
