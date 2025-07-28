@@ -132,6 +132,8 @@ All pipeline runs are initiated through the *run_smedanno.sh* wrapper script. Th
                                         (Use the closest taxon; splice motifs are highly conserved, e.g. honey-bee works for most non-model metazoans)
 		   --deepSpliceThr FLOAT         Posterior cutoff passed to DeepSplice (default: 0.65)
                    --noDeepSplice                Skip DeepSplice (default behaviour)
+                   --junctionGuide PATH          Absolute path to a pre-computed junction GTF file to use as a guide
+                   --deepSpliceGuide PATH        Absolute path to a pre-computed DeepSplice GTF file to use as a guide
 		   --genomeType <type>           Specify the type of genome being processed. Options: 'nuclear', 'mito', 'mixed'.
 		                                 If not set, the script will auto-detect 'mixed' if headers match --mitoPattern.
 		                                 default: 'nuclear'.
