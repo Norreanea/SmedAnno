@@ -373,9 +373,12 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 			show_help
 		fi
 
-		if ! is_version_ge "${STRINGTIE_MIX_VERSION}" "${min_mix_version}"; then
-			echo_red "Error: Invalid version for --stringtie_mix. The '--mix' functionality requires StringTie v${min_mix_version} or newer, but you provided v${STRINGTIE_MIX_VERSION}."
-			show_help
+		# Only validate the mix version if mixed-read samples are actually present
+		if [ ${#MIX_SAMPLES[@]} -gt 0 ]; then
+			if ! is_version_ge "${STRINGTIE_MIX_VERSION}" "${min_mix_version}"; then
+				echo_red "Error: Invalid version for --stringtie_mix. The '--mix' functionality requires StringTie v${min_mix_version} or newer, but you provided v${STRINGTIE_MIX_VERSION}."
+				show_help
+			fi
 		fi
 
 		# Conditionally validate --genomeType if the user provided it
