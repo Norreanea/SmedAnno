@@ -128,8 +128,8 @@ All pipeline runs are initiated through the *run_smedanno.sh* wrapper script. Th
 		   --trimLen N                  Minimum read length after trimming       (default: 20 bp.)
 		   --deepSpliceSpecies SPECIES   Enable DeepSplice splice-site guidance with one of:
                  Available DeepSplice species:
-                                         human, mouse, zebrafish, honeybee, thalecress
-                                        (Use the closest taxon; splice motifs are highly conserved, e.g. honey-bee works for most non-model metazoans)
+                   human, mouse, zebrafish, honeybee, thalecress
+                   (Use the closest taxon; splice motifs are highly conserved, e.g. honey-bee works for most non-model metazoans)
 		   --deepSpliceThr FLOAT         Posterior cutoff passed to DeepSplice (default: 0.65)
                    --noDeepSplice                Skip DeepSplice (default behaviour)
                    --junctionGuide PATH          Absolute path to a pre-computed junction GTF file to use as a guide
