@@ -106,6 +106,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
         echo "                               (Use the closest taxon; splice motifs are highly conserved, e.g. honey-bee works for most non-model metazoans)"
 		echo "  --deepSpliceThr FLOAT         Posterior cutoff passed to DeepSplice (default: 0.65)"
         echo "  --noDeepSplice                Skip DeepSplice (default behaviour)"
+		echo "  --junctionGuide PATH          Absolute path to a pre-computed junction GTF file to use as a guide"
+		echo "  --deepSpliceGuide PATH        Absolute path to a pre-computed DeepSplice GTF file to use as a guide"
 		echo "  --genomeType <type>           Specify the type of genome being processed. Options: 'nuclear', 'mito', 'mixed'."
 		echo "                                If not set, the script will auto-detect 'mixed' if headers match --mitoPattern."
 		echo "                                default: 'nuclear'."
@@ -408,7 +410,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		fi
 
         # DeepSplice validation (only if enabled)
-		if [[ "${DEEPSPLICE}" == true ]]; then
+		if [[ -n "${DEEPSPLICE_SPECIES}" ]]; then
 			local valid_deepsplice_sp=("human" "mouse" "zebrafish" "honeybee" "thalecress")
 			if ! contains "${DEEPSPLICE_SPECIES}" "${valid_deepsplice_sp[@]}"; then
 				echo_red "Error: Invalid --deepSpliceSpecies '${DEEPSPLICE_SPECIES}'."
@@ -743,7 +745,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		local current_align_dir_mix=${ALIGN_DIR_MIX:-$ALIGN_DIR_MIX_INTERNAL}
 		local temp_bam_dir="${ASSEMBLY_DIR}/temp_bams_with_xs"
         mkdir -p "${temp_bam_dir}"
-
+		
 		echo_green "Verifying and adding XS strand tags to all input BAMs before processing..."
 
 		# Create new lists to hold paths to BAMs that are guaranteed to have the XS tag
@@ -791,38 +793,57 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 				corrected_mix_bams+=("${corrected_bam_path}")
 			fi
 		done
-
-		# Generate splice guides from ALL corrected BAMs
-		local all_corrected_bams=("${corrected_short_bams[@]}" "${corrected_mix_bams[@]}")
+			
 		local JUNCTION_GTF="${ASSEMBLY_DIR}/junctions_from_bams.gtf"
-		
-		if [ ${#all_corrected_bams[@]} -gt 0 ]; then
-			echo_green "Creating and indexing a temporary merged BAM for junction extraction..."
-			local temp_merged_bam="${temp_bam_dir}/merged_for_junctions.bam"
-			TEMP_FILES+=("${temp_merged_bam}" "${temp_merged_bam}.bai") # Ensure cleanup on exit
+		if [ -n "${JUNCTION_GUIDE_USER}" ]; then
+			echo_green "Using pre-computed junction guide from: ${JUNCTION_GUIDE_USER}"
+			if [ ! -s "${JUNCTION_GUIDE_USER}" ]; then
+				echo_red "Error: The provided junction guide file is missing or empty: ${JUNCTION_GUIDE_USER}"
+				exit 1
+			fi
+			cp "${JUNCTION_GUIDE_USER}" "${JUNCTION_GTF}"
+		else
 
-			# Create the merged, sorted, and indexed BAM file
-			samtools merge -f -@ "${THREADS}" "${temp_merged_bam}" "${all_corrected_bams[@]}"
-			samtools index -@ "${THREADS}" "${temp_merged_bam}"
+			# Generate splice guides from ALL corrected BAMs
+			local all_corrected_bams=("${corrected_short_bams[@]}" "${corrected_mix_bams[@]}")
+			
+			if [ ${#all_corrected_bams[@]} -gt 0 ]; then
+				echo_green "Creating and indexing a temporary merged BAM for junction extraction..."
+				local temp_merged_bam="${temp_bam_dir}/merged_for_junctions.bam"
+				TEMP_FILES+=("${temp_merged_bam}" "${temp_merged_bam}.bai") # Ensure cleanup on exit
 
-			echo_green "Extracting splice junctions from the prepared merged BAM..."
-			regtools junctions extract -a 8 -m 50 -M 500000 -s XS "${temp_merged_bam}" | \
-				awk 'BEGIN{OFS="\t"} $5 >= 3 {
-					chrom=$1; start=$2; end=$3; strand=$6;
-					id="JUNC_"NR;
-					gq="\042"; # Use octal code for a double quote to avoid shell issues
-					attrs="gene_id " gq id gq "; transcript_id " gq id gq ";";
-					exon1_attrs = attrs " exon_number " gq "1" gq ";";
-					exon2_attrs = attrs " exon_number " gq "2" gq ";";
-					printf "%s\tSmedAnno\ttranscript\t%d\t%d\t.\t%s\t.\t%s\n", chrom, start, end, strand, attrs;
-					printf "%s\tSmedAnno\texon\t%d\t%d\t.\t%s\t.\t%s\n", chrom, start, start, strand, exon1_attrs;
-					printf "%s\tSmedAnno\texon\t%d\t%d\t.\t%s\t.\t%s\n", chrom, end, end, strand, exon2_attrs;
-				}' > "${JUNCTION_GTF}"
+				# Create the merged, sorted, and indexed BAM file
+				samtools merge -f -@ "${THREADS}" "${temp_merged_bam}" "${all_corrected_bams[@]}"
+				samtools index -@ "${THREADS}" "${temp_merged_bam}"
+
+				echo_green "Extracting splice junctions from the prepared merged BAM..."
+				regtools junctions extract -a 8 -m 50 -M 500000 -s XS "${temp_merged_bam}" | \
+					awk 'BEGIN{OFS="\t"} $5 >= 3 {
+						chrom=$1; start=$2; end=$3; strand=$6;
+						id="JUNC_"NR;
+						gq="\042"; # Use octal code for a double quote to avoid shell issues
+						attrs="gene_id " gq id gq "; transcript_id " gq id gq ";";
+						exon1_attrs = attrs " exon_number " gq "1" gq ";";
+						exon2_attrs = attrs " exon_number " gq "2" gq ";";
+						printf "%s\tSmedAnno\ttranscript\t%d\t%d\t.\t%s\t.\t%s\n", chrom, start, end, strand, attrs;
+						printf "%s\tSmedAnno\texon\t%d\t%d\t.\t%s\t.\t%s\n", chrom, start, start, strand, exon1_attrs;
+						printf "%s\tSmedAnno\texon\t%d\t%d\t.\t%s\t.\t%s\n", chrom, end, end, strand, exon2_attrs;
+					}' > "${JUNCTION_GTF}"
+			fi
 		fi
 
 		# Run optional ab initio splice predictors 
 		local DS_GUIDE_GTF="${ASSEMBLY_DIR}/splice_guides_deepsplice.gtf"
-		if [[ "${DEEPSPLICE}" == true ]]; then
+		# First, check if the user provided a pre-computed DeepSplice guide file
+		if [ -n "${DEEPSPLICE_GUIDE_USER}" ]; then
+			echo_green "Using pre-computed DeepSplice guide from: ${DEEPSPLICE_GUIDE_USER}"
+			if [ ! -s "${DEEPSPLICE_GUIDE_USER}" ]; then 
+				echo_red "Error: Provided DeepSplice guide is missing or empty: ${DEEPSPLICE_GUIDE_USER}"
+				exit 1
+			fi
+			cp "${DEEPSPLICE_GUIDE_USER}" "${DS_GUIDE_GTF}"
+		# If not, check if we need to generate one
+		elif [[ "${DEEPSPLICE}" == true ]]; then
 			echo_green "Running DeepSplice to generate splice-site guide…"
 			local DS_GUIDE_GFF="${ASSEMBLY_DIR}/splice_guides_raw.gff3"
 			python3 "$(dirname "$0")/deepsplice.py" --weights "${DSMODEL_DIR}/model_${DEEPSPLICE_SPECIES}.pt" --thr "${DEEPSPLICE_THR}" -o "${DS_GUIDE_GFF}" "${GENOME_REF}"
@@ -841,11 +862,39 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		if [ ${#guides_to_merge[@]} -gt 1 ]; then
 			echo_green "Merging ${#guides_to_merge[@]} sources of splice evidence..."
 			FINAL_GUIDE_GTF="${ASSEMBLY_DIR}/splice_guides_merged.gtf"
+			# Concatenate all guide files
 			cat "${guides_to_merge[@]}" | \
-				awk '$3=="exon"{print $1,$4,$5,$7}' OFS='\t' | \
-				sort -u | \
-				awk 'BEGIN{OFS="\t"}{id="GUIDE_"NR; print $1,"Merged","exon",$2,$3,".",".",$4,"gene_id \""id"\"; transcript_id \""id"\";"}' \
-				> "${FINAL_GUIDE_GTF}"
+
+			# Filter for exon lines and get unique coordinates
+			awk 'BEGIN{OFS="\t"} $3=="exon"{print $1,$4,$5,$7}' | \
+			sort -u | \
+
+			# Rebuild a valid GTF structure from the unique coordinates
+			awk 'BEGIN{OFS="\t"} {
+				# Create a unique ID for each new guide transcript.
+				id="GUIDE_"NR;
+				
+				# Define the attributes string shared by the transcript and its child exons.
+				attrs="gene_id \""id"\"; transcript_id \""id"\";";
+				
+				# Extract coordinate and strand info.
+				chrom=$1; start=$2; end=$3; strand=$4;
+				
+				# 📝 Print the necessary parent "transcript" feature.
+				print chrom, "Merged", "transcript", start, end, ".", strand, ".", attrs;
+				
+				# Print the first exon (donor site).
+				print chrom, "Merged", "exon", start, start, ".", strand, ".", attrs;
+				
+				# Print the second exon (acceptor site).
+				print chrom, "Merged", "exon", end, end, ".", strand, ".", attrs;
+				
+			}' > "${FINAL_GUIDE_GTF}"
+			# cat "${guides_to_merge[@]}" | \
+				# awk 'BEGIN{OFS="\t"} $3=="exon"{print $1,$4,$5,$7}' | \
+				# sort -u | \
+				# awk 'BEGIN{OFS="\t"}{id="GUIDE_"NR; print $1,"Merged","exon",$2,$3,".",".",$4,"gene_id \""id"\"; transcript_id \""id"\";"}' \
+				# > "${FINAL_GUIDE_GTF}"
 		elif [ ${#guides_to_merge[@]} -eq 1 ]; then
 			echo_green "Using a single source of splice evidence: ${guides_to_merge[0]}"
 			FINAL_GUIDE_GTF="${guides_to_merge[0]}"
@@ -1317,7 +1366,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     #DEEPSPLICE_WEIGHTS=""
     SPLICE_ID_PREFIX=""
     GUIDE_OPT=""    
-    NO_FUNCTIONAL=false	
+    NO_FUNCTIONAL=false
+	JUNCTION_GUIDE_USER=""
+	DEEPSPLICE_GUIDE_USER=""
 	MAX_DISTANCE=1000
 	LARGE_INTRON_THRESHOLD=100000
 	BLAST_EVALUE="1e-5"
@@ -1363,6 +1414,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 			--deepSpliceSpecies) DEEPSPLICE=true; DEEPSPLICE_SPECIES="$2"; shift 2 ;;
 			--noDeepSplice) DEEPSPLICE=false; shift ;;
 			--deepSpliceThr) DEEPSPLICE_THR="$2"; shift 2 ;;
+			--junctionGuide) JUNCTION_GUIDE_USER="$2"; shift 2 ;;
+            --deepSpliceGuide) DEEPSPLICE=true; DEEPSPLICE_GUIDE_USER="$2"; shift 2 ;;
 			--noFunctionalPrediction) NO_FUNCTIONAL=true; FUNCTIONAL_METHODS=""; shift ;;
 			--pfamDB) PFAM_DB="$2"; shift 2 ;;
 			--genomeType) GENOME_TYPE_USER="$2"; shift 2;;
