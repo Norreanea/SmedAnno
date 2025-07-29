@@ -740,91 +740,70 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	step3_gene_transcript_assembly() {
 		echo_blue  "Starting Step 3: Gene and Transcript Assembly"
 		
-		# Generate splice guides directly from RNA-seq alignments ---
-		echo_green "Generating splice-site guide from your alignment (BAM) data..."
-
-		# Define paths for user-provided or internally generated alignment directories
 		local current_align_dir_short=${ALIGN_DIR_SHORT:-$ALIGN_DIR_SHORT_INTERNAL}
-		local current_align_dir_mix=${ALIGN_DIR_MIX:-$ALIGN_DIR_MIX_INTERNAL}
-		local temp_bam_dir="${ASSEMBLY_DIR}/temp_bams_with_xs"
-        mkdir -p "${temp_bam_dir}"
+        local current_align_dir_mix=${ALIGN_DIR_MIX:-$ALIGN_DIR_MIX_INTERNAL}
 		
-		echo_green "Verifying and adding XS strand tags to all input BAMs before processing..."
-
-		# Create new lists to hold paths to BAMs that are guaranteed to have the XS tag
 		local corrected_short_bams=()
 		local corrected_mix_bams=()
-
-		# Process short-only samples to check/add XS tags
+		
+		# Process short-only samples to identify BAMs and check/add XS tags
 		for bam_filename in "${SHORT_ONLY_SAMPLES[@]}"; do
 			local input_bam="${current_align_dir_short}/${bam_filename}"
-			if [ ! -f "${input_bam}" ]; then
-				echo_red "BAM file not found: ${input_bam}. Skipping."
-				continue
-			fi
-
-			# Check for the XS tag. If it exists, use the original file.
-			# If not, create a new temporary file with the tag and use that.
+			[ ! -f "${input_bam}" ] && { echo_red "BAM not found: ${input_bam}. Skipping."; continue; }
+			# The script now always checks for XS tags, even if guides are pre-computed.
 			if samtools view "${input_bam}" 2>/dev/null | head -n 100 | grep -q 'XS:A:'; then
 				corrected_short_bams+=("${input_bam}")
 			else
 				echo_yellow "Adding XS tag to ${bam_filename}..."
-				local sample_name; sample_name=$(basename "${bam_filename}" .bam)
+				local temp_bam_dir="${ASSEMBLY_DIR}/temp_bams_with_xs"
+				mkdir -p "${temp_bam_dir}"
+				local sample_name=$(basename "${bam_filename}" .bam)
 				local corrected_bam_path="${temp_bam_dir}/${sample_name}_withXS.bam"
 				samtools view -h "${input_bam}" | gawk -v strType=2 -f ./tagXSstrandedData.awk | samtools view -bS - > "${corrected_bam_path}"
-				TEMP_FILES+=("${corrected_bam_path}") # Ensure cleanup on exit
+				TEMP_FILES+=("${corrected_bam_path}")
 				corrected_short_bams+=("${corrected_bam_path}")
 			fi
 		done
 
-		# Process short-read BAMs from mixed samples to check/add XS tags
+		# Process short-read BAMs from mixed samples
 		for bam_filename in "${MIX_SAMPLES[@]}"; do
 			local input_bam="${current_align_dir_mix}/${bam_filename}"
-			if [ ! -f "${input_bam}" ]; then
-				echo_red "Mixed-mode short-read BAM not found: ${input_bam}. Skipping."
-				continue
-			fi
-			
+			[ ! -f "${input_bam}" ] && { echo_red "Mixed-mode short-read BAM not found: ${input_bam}. Skipping."; continue; }
 			if samtools view "${input_bam}" 2>/dev/null | head -n 100 | grep -q 'XS:A:'; then
 				corrected_mix_bams+=("${input_bam}")
 			else
 				echo_yellow "Adding XS tag to ${bam_filename}..."
-				local sample_name; sample_name=$(basename "${bam_filename}" .bam | sed -E 's/(_STAR_Aligned\.sortedByCoord\.outXS|_STAR_Aligned\.sortedByCoord\.out)//')
+				local temp_bam_dir="${ASSEMBLY_DIR}/temp_bams_with_xs"
+				mkdir -p "${temp_bam_dir}"
+				local sample_name=$(basename "${bam_filename}" | sed -E 's/(_STAR_Aligned\.sortedByCoord\.outXS|_STAR_Aligned\.sortedByCoord\.out)//')
 				local corrected_bam_path="${temp_bam_dir}/${sample_name}_withXS.bam"
 				samtools view -h "${input_bam}" | gawk -v strType=2 -f ./tagXSstrandedData.awk | samtools view -bS - > "${corrected_bam_path}"
 				TEMP_FILES+=("${corrected_bam_path}")
 				corrected_mix_bams+=("${corrected_bam_path}")
 			fi
 		done
-			
+		# Generate splice guides from RNA-seq alignments
 		local JUNCTION_GTF="${ASSEMBLY_DIR}/junctions_from_bams.gtf"
 		if [ -n "${JUNCTION_GUIDE_USER}" ]; then
 			echo_green "Using pre-computed junction guide from: ${JUNCTION_GUIDE_USER}"
-			if [ ! -s "${JUNCTION_GUIDE_USER}" ]; then
-				echo_red "Error: The provided junction guide file is missing or empty: ${JUNCTION_GUIDE_USER}"
-				exit 1
-			fi
+			[ ! -s "${JUNCTION_GUIDE_USER}" ] && { echo_red "Error: Provided junction guide is missing or empty: ${JUNCTION_GUIDE_USER}"; exit 1; }
 			cp "${JUNCTION_GUIDE_USER}" "${JUNCTION_GTF}"
 		else
-
-			# Generate splice guides from ALL corrected BAMs
+			echo_green "Generating splice-site guide from alignment (BAM) data..."
 			local all_corrected_bams=("${corrected_short_bams[@]}" "${corrected_mix_bams[@]}")
-			
 			if [ ${#all_corrected_bams[@]} -gt 0 ]; then
-				echo_green "Creating and indexing a temporary merged BAM for junction extraction..."
+				local temp_bam_dir="${ASSEMBLY_DIR}/temp_bams_with_xs"
+				mkdir -p "${temp_bam_dir}"
 				local temp_merged_bam="${temp_bam_dir}/merged_for_junctions.bam"
-				TEMP_FILES+=("${temp_merged_bam}" "${temp_merged_bam}.bai") # Ensure cleanup on exit
-
-				# Create the merged, sorted, and indexed BAM file
+				TEMP_FILES+=("${temp_merged_bam}" "${temp_merged_bam}.bai")
+				
+				echo_green "Extracting splice junctions from all BAM files..."
 				samtools merge -f -@ "${THREADS}" "${temp_merged_bam}" "${all_corrected_bams[@]}"
 				samtools index -@ "${THREADS}" "${temp_merged_bam}"
-
-				echo_green "Extracting splice junctions from the prepared merged BAM..."
-				regtools junctions extract -a 8 -m 50 -M 500000 -s XS "${temp_merged_bam}" | \
+				
+				regtools junctions extract -a 8 -m 150 -M 500000 -s XS "${temp_merged_bam}" | \
 					awk 'BEGIN{OFS="\t"} $5 >= 3 {
-						chrom=$1; start=$2; end=$3; strand=$6;
-						id="JUNC_"NR;
-						gq="\042"; # Use octal code for a double quote to avoid shell issues
+						chrom=$1; start=$2; end=$3; strand=$6; id="JUNC_"NR; gq="\042";
 						attrs="gene_id " gq id gq "; transcript_id " gq id gq ";";
 						exon1_attrs = attrs " exon_number " gq "1" gq ";";
 						exon2_attrs = attrs " exon_number " gq "2" gq ";";
@@ -834,89 +813,32 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 					}' > "${JUNCTION_GTF}"
 			fi
 		fi
-
-		# Run optional ab initio splice predictors 
+		# Generate or use pre-computed DeepSplice guides 
 		local DS_GUIDE_GTF="${ASSEMBLY_DIR}/splice_guides_deepsplice.gtf"
-		# First, check if the user provided a pre-computed DeepSplice guide file
 		if [ -n "${DEEPSPLICE_GUIDE_USER}" ]; then
-			echo_green "Using pre-computed DeepSplice guide from: ${DEEPSPLICE_GUIDE_USER}"
-			if [ ! -s "${DEEPSPLICE_GUIDE_USER}" ]; then 
-				echo_red "Error: Provided DeepSplice guide is missing or empty: ${DEEPSPLICE_GUIDE_USER}"
-				exit 1
-			fi
+			echo_green "Using pre-computed DeepSplice guide: ${DEEPSPLICE_GUIDE_USER}"
+			[ ! -s "${DEEPSPLICE_GUIDE_USER}" ] && { echo_red "Error: Provided DeepSplice guide is missing or empty."; exit 1; }
 			cp "${DEEPSPLICE_GUIDE_USER}" "${DS_GUIDE_GTF}"
-		# If not, check if we need to generate one
-		elif [[ "${DEEPSPLICE}" == true ]]; then
-			echo_green "Running DeepSplice to generate splice-site guide…"
+		elif [ -n "${DEEPSPLICE_SPECIES}" ]; then
+			echo_green "Running DeepSplice to generate splice-site guide..."
 			local DS_GUIDE_GFF="${ASSEMBLY_DIR}/splice_guides_raw.gff3"
 			python3 "$(dirname "$0")/deepsplice.py" --weights "${DSMODEL_DIR}/model_${DEEPSPLICE_SPECIES}.pt" --thr "${DEEPSPLICE_THR}" -o "${DS_GUIDE_GFF}" "${GENOME_REF}"
 			gawk -F'\t' '$3=="donor"||$3=="acceptor" {id="DS_"NR; printf "%s\tDeepSplice\texon\t%s\t%s\t%s\t.\t%s\tgene_id \"%s\"; transcript_id \"%s\";\n", $1,$4,$5,$6,$8,id,id}' "${DS_GUIDE_GFF}" > "${DS_GUIDE_GTF}"
 		fi
-
-		# Merge all available splice guides
-		echo_green "Combining all available splice evidence..."
-		local guides_to_merge=()
-		[ -s "${JUNCTION_GTF}" ] && guides_to_merge+=("${JUNCTION_GTF}")
-		[ -s "${DS_GUIDE_GTF}" ]  && guides_to_merge+=("${DS_GUIDE_GTF}")
 		
-		local FINAL_GUIDE_GTF=""
+		# Pass 1 assembly 
+		# The guide option uses the junctions from BAMs
 		local GUIDE_OPT=""
-
-		if [ ${#guides_to_merge[@]} -gt 1 ]; then
-			echo_green "Merging ${#guides_to_merge[@]} sources of splice evidence..."
-			FINAL_GUIDE_GTF="${ASSEMBLY_DIR}/splice_guides_merged.gtf"
-			# Concatenate all guide files
-			cat "${guides_to_merge[@]}" | \
-
-			# Filter for exon lines and get unique coordinates
-			awk 'BEGIN{OFS="\t"} $3=="exon"{print $1,$4,$5,$7}' | \
-			sort -u | \
-
-			# Rebuild a valid GTF structure from the unique coordinates
-			awk 'BEGIN{OFS="\t"} {
-				# Create a unique ID for each new guide transcript.
-				id="GUIDE_"NR;
-				
-				# Define the attributes string shared by the transcript and its child exons.
-				attrs="gene_id \""id"\"; transcript_id \""id"\";";
-				
-				# Extract coordinate and strand info.
-				chrom=$1; start=$2; end=$3; strand=$4;
-				
-				# 📝 Print the necessary parent "transcript" feature.
-				print chrom, "Merged", "transcript", start, end, ".", strand, ".", attrs;
-				
-				# Print the first exon (donor site).
-				print chrom, "Merged", "exon", start, start, ".", strand, ".", attrs;
-				
-				# Print the second exon (acceptor site).
-				print chrom, "Merged", "exon", end, end, ".", strand, ".", attrs;
-				
-			}' > "${FINAL_GUIDE_GTF}"
-			# cat "${guides_to_merge[@]}" | \
-				# awk 'BEGIN{OFS="\t"} $3=="exon"{print $1,$4,$5,$7}' | \
-				# sort -u | \
-				# awk 'BEGIN{OFS="\t"}{id="GUIDE_"NR; print $1,"Merged","exon",$2,$3,".",".",$4,"gene_id \""id"\"; transcript_id \""id"\";"}' \
-				# > "${FINAL_GUIDE_GTF}"
-		elif [ ${#guides_to_merge[@]} -eq 1 ]; then
-			echo_green "Using a single source of splice evidence: ${guides_to_merge[0]}"
-			FINAL_GUIDE_GTF="${guides_to_merge[0]}"
-		fi
-
-		if [ -n "${FINAL_GUIDE_GTF}" ]; then
-			GUIDE_OPT="-G ${FINAL_GUIDE_GTF}"
-			echo_green "Final guide for StringTie is ready."
+		if [ -s "${JUNCTION_GTF}" ]; then
+			GUIDE_OPT="-G ${JUNCTION_GTF}"
+			echo_green "Using RNA-seq junctions as the guide for initial assembly."
 		else
-			echo_yellow "Warning: No splice guides were generated. Proceeding with unguided assembly."
+			echo_yellow "Warning: No RNA-seq junctions found. Proceeding with unguided assembly."
 		fi
 
-
-		# Assemble final option for StringTie
-		#[[ -n "${GUIDE_GTF}" ]] && GUIDE_OPT="-G ${GUIDE_GTF}" || GUIDE_OPT=""
-		
 		# Assemble short-read only samples
 		for bam_for_assembly in "${corrected_short_bams[@]}"; do
-			local sample; sample=$(basename "${bam_for_assembly}" | sed -E 's/(_withXS)?\.bam$//')
+			local sample=$(basename "${bam_for_assembly}" | sed -E 's/(_withXS)?\.bam$//')
 			echo_green "Assembling transcripts for sample: \"${sample}\""
 			if [ -n "${GENOME_GTF}" ]; then
 				echo_green "Running StringTie for reference-based assembly (RB, SR)"
@@ -928,12 +850,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 
 		# Assemble mixed-read samples
 		for short_bam_for_assembly in "${corrected_mix_bams[@]}"; do
-			local sample; sample=$(basename "${short_bam_for_assembly}" | sed -E 's/(_STAR_Aligned\.sortedByCoord\.outXS|_withXS)?\.bam$//')
+			local sample=$(basename "${short_bam_for_assembly}" | sed -E 's/(_STAR_Aligned\.sortedByCoord\.outXS|_withXS)?\.bam$//')
 			local long_bam_for_assembly="${current_align_dir_mix}/${sample}_long_aligned.bam"
-			if [ ! -f "${long_bam_for_assembly}" ]; then
-				echo_red "Long-read BAM not found for sample ${sample} at ${long_bam_for_assembly}. Skipping assembly."
-				continue
-			fi
+			[ ! -f "${long_bam_for_assembly}" ] && { echo_red "Long-read BAM not found for ${sample}. Skipping."; continue; }
 
 			echo_green "Assembling transcripts for mixed-read sample: \"${sample}\""
 			if [ -n "${GENOME_GTF}" ]; then
@@ -943,7 +862,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 			echo_green "Running StringTie for de novo assembly (DN, MR)"
 			conda run -n ${ENV_MIX} stringtie --mix -p "${THREADS}" ${GUIDE_OPT} -c "${STRINGTIE2_COVERAGE}" -f "${STRINGTIE2_ABUNDANCE}" -o "${MR_DN_GTF_DIR_INTERNAL}/${sample}_MR_DN.gtf" "${short_bam_for_assembly}" "${long_bam_for_assembly}"
 		done
-		echo_blue  "Step 3 Completed: Gene and Transcript Assembly"
+		echo_blue "Step 3 Completed: Gene and Transcript Assembly"
 	}
 
 	# ---------------------------
@@ -987,7 +906,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		local target_dir_sr_dn=${SR_DN_GTF_DIR:-$SR_DN_GTF_DIR_INTERNAL}
 		local target_dir_mr_dn=${MR_DN_GTF_DIR:-$MR_DN_GTF_DIR_INTERNAL}
 		
-		# Merge SR De Novo
+		# Merge SR de novo
 		if [ -d "${target_dir_sr_dn}" ]; then
 			local LIST_SR_DN_GTF="${MERGE_DIR}/SR_DN_gtf_list.txt"
 			find "${target_dir_sr_dn}" -name "*.gtf" -type f -size +1c > "${LIST_SR_DN_GTF}"
@@ -997,7 +916,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 			fi
 		fi
 		
-		# Merge MR De Novo
+		# Merge MR de novo
 		if [ -d "${target_dir_mr_dn}" ]; then
 			local LIST_MR_DN_GTF="${MERGE_DIR}/MR_DN_gtf_list.txt"
 			find "${target_dir_mr_dn}" -name "*.gtf" -type f -size +1c > "${LIST_MR_DN_GTF}"
@@ -1007,19 +926,33 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 			fi
 		fi
 
-		echo_green "Creating pre-final annotation GTF"
-		local merge_list=()
-		[ -s "${MERGE_DIR}/merged_SR_RB.gtf" ] && merge_list+=("${MERGE_DIR}/merged_SR_RB.gtf")
-		[ -s "${MERGE_DIR}/merged_MR_RB.gtf" ] && merge_list+=("${MERGE_DIR}/merged_MR_RB.gtf")
-		[ -s "${MERGE_DIR}/merged_SR_DN.gtf" ] && merge_list+=("${MERGE_DIR}/merged_SR_DN.gtf")
-		[ -s "${MERGE_DIR}/merged_MR_DN.gtf" ] && merge_list+=("${MERGE_DIR}/merged_MR_DN.gtf")
+		# Main merge of all assemblies ---
+		echo_green "Creating intermediate annotation from all assembled transcripts"
+		local intermediate_merge_list=()
+		[ -s "${MERGE_DIR}/merged_SR_RB.gtf" ] && intermediate_merge_list+=("${MERGE_DIR}/merged_SR_RB.gtf")
+		[ -s "${MERGE_DIR}/merged_MR_RB.gtf" ] && intermediate_merge_list+=("${MERGE_DIR}/merged_MR_RB.gtf")
+		[ -s "${MERGE_DIR}/merged_SR_DN.gtf" ] && intermediate_merge_list+=("${MERGE_DIR}/merged_SR_DN.gtf")
+		[ -s "${MERGE_DIR}/merged_MR_DN.gtf" ] && intermediate_merge_list+=("${MERGE_DIR}/merged_MR_DN.gtf")
 		
-		if [ ${#merge_list[@]} -gt 0 ]; then
-			echo_green "Merging all available assemblies into pre-final annotation"
-			conda run -n ${ENV_MIX} stringtie --merge -p "${THREADS}" -o "${MERGE_DIR}/prefinal_annotation.gtf" "${merge_list[@]}"
+		local INTERMEDIATE_GTF="${MERGE_DIR}/intermediate_annotation.gtf"
+		if [ ${#intermediate_merge_list[@]} -gt 0 ]; then
+			conda run -n ${ENV_MIX} stringtie --merge -p "${THREADS}" -o "${INTERMEDIATE_GTF}" "${intermediate_merge_list[@]}"
 		else
-			echo_red "No merged GTF files available to create a pre-final annotation. Skipping."
+			echo_red "No merged GTF files available to create an intermediate annotation. Skipping."
+			return
 		fi
+
+		# 2nd merge pass to refine with DeepSplice
+		local DS_GUIDE_GTF="${ASSEMBLY_DIR}/splice_guides_deepsplice.gtf"
+		if [ -s "${DS_GUIDE_GTF}" ]; then
+			echo_green "Refining annotation by merging with DeepSplice predictions (Two-Pass)..."
+			local final_merge_list=("${INTERMEDIATE_GTF}" "${DS_GUIDE_GTF}")
+			conda run -n ${ENV_MIX} stringtie --merge -p "${THREADS}" -o "${MERGE_DIR}/prefinal_annotation.gtf" "${final_merge_list[@]}"
+		else
+			echo_yellow "No DeepSplice guide found. Promoting intermediate annotation to pre-final."
+			cp "${INTERMEDIATE_GTF}" "${MERGE_DIR}/prefinal_annotation.gtf"
+		fi
+
 		echo_blue "Step 5 Completed: Merge De Novo Assemblies and Create Pre-Final Annotation"
 	}
 
@@ -1119,19 +1052,14 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		local SANITIZED_GTF="${ANNOTATION_DIR}/sanitized.final.gtf"
 		if [ ! -s "${SANITIZED_GTF}" ] || [ "$(realpath "${ANNOTATED_GTF}")" != "$(realpath "${SANITIZED_GTF}")" ]; then
 			echo_green "Sanitizing GTF file to correct non-standard whitespace..."
-			# Use a temporary file to prevent self-overwrite issues
-			local temp_gtf; temp_gtf=$(mktemp)
-			TEMP_FILES+=("$temp_gtf")
-			# Process substitution to ensure the GTF is correctly
-			# formatted with single TAB delimiters and no trailing whitespace.
-			gawk 'BEGIN{OFS="\t"} !/^#/{gsub(/[ \t]+$/, ""); $1=$1; print} /^#/{print}' <(sed 's/\xC2\xA0/ /g' "${ANNOTATED_GTF}") > "$temp_gtf"
-			mv "$temp_gtf" "${SANITIZED_GTF}"
+			gawk 'BEGIN{OFS="\t"} !/^#/{gsub(/[ \t]+$/, ""); $1=$1; print} /^#/{print}' <(sed 's/\xC2\xA0/ /g' "${ANNOTATED_GTF}") > "${SANITIZED_GTF}"
 		else
 			echo_yellow "Skipping sanitization, output file already exists and is the same as input: ${SANITIZED_GTF}"
 		fi
 
 		echo_green "Detecting genome composition from sanitized GTF..."
 		local has_nucl=false; local has_mito=false
+		# Use gawk to check for nuclear and mitochondrial contigs based on the pattern
 		[ -n "$(gawk -v pattern="${MITO_PATTERN}" '!/^#/ && $1 !~ pattern' "${SANITIZED_GTF}")" ] && has_nucl=true
 		[ -n "$(gawk -v pattern="${MITO_PATTERN}" '!/^#/ && $1 ~ pattern' "${SANITIZED_GTF}")" ] && has_mito=true
 		
@@ -1146,7 +1074,6 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 
 		local NUCL_TRANSCRIPTS_FA="${FUNCTIONAL_DIR}/nuclear_transcripts.fa"
 		local MITO_TRANSCRIPTS_FA="${FUNCTIONAL_DIR}/mito_transcripts.fa"
-		local LONGEST_ORFS_PEP="${FUNCTIONAL_DIR}/longest_orfs.pep"
 
 		# Create transcript FASTA if they don't exist
 		if [[ "$GENOME_TYPE" == "nuclear" || "$GENOME_TYPE" == "mixed" ]]; then
@@ -1166,60 +1093,52 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 			fi
 		fi
 				
-
+		# CORRECTED: This helper function is now more robust.
 		run_transdecoder() {
 			local input_fasta="$1"; local genetic_code="$2"; local output_prefix="$3"
 			local final_pep_file="${FUNCTIONAL_DIR}/$(basename "${input_fasta}").transdecoder.pep"
+			
+			# Check if final output exists to skip the whole process
 			if [ -s "${final_pep_file}" ]; then
 				echo_yellow "Skipping TransDecoder for $(basename "${input_fasta}"), final output exists."
 				return 0
 			fi
+			
 			local genetic_code_cap=${genetic_code^}
 			echo_green "Running TransDecoder for '${output_prefix}' with genetic code '${genetic_code_cap}'..."
-			pushd "${FUNCTIONAL_DIR}" > /dev/null
-			local fasta_basename
-			fasta_basename=$(basename "${input_fasta}")
+			
+			# CORRECTED: Removed pushd/popd and use full path for robustness.
+			TransDecoder.LongOrfs -t "${input_fasta}" --genetic_code "${genetic_code_cap}" -O "${FUNCTIONAL_DIR}"
 
-			TransDecoder.LongOrfs -t "${fasta_basename}" --genetic_code "${genetic_code_cap}"
-
+			local predict_opts="--single_best_only"
 			# Conditionally add --no_refine_starts for mito transcripts to avoid training errors on small datasets
-			local predict_opts=""
 			if [ "${output_prefix}" == "mito" ]; then
 				echo_yellow "Mitochondrial dataset detected. Skipping start site refinement in TransDecoder.Predict."
-				predict_opts="--no_refine_starts"
+				predict_opts+=" --no_refine_starts"
 			fi
-			TransDecoder.Predict -t "${fasta_basename}" --genetic_code "${genetic_code_cap}" --single_best_only ${predict_opts}
-			
-			popd > /dev/null
+			TransDecoder.Predict -t "${input_fasta}" --genetic_code "${genetic_code_cap}" ${predict_opts} -O "${FUNCTIONAL_DIR}"
 		}
 
 		if [[ "$GENOME_TYPE" == "nuclear" || "$GENOME_TYPE" == "mixed" ]]; then
-		    if [ -s "${NUCL_TRANSCRIPTS_FA}" ]; then 
-			   run_transdecoder "${NUCL_TRANSCRIPTS_FA}" "${GENETIC_CODE_NUCL}" "nuclear"
-			else
-			   echo_yellow "Skipping TransDecoder, output exists." 
-			fi
+			[ -s "${NUCL_TRANSCRIPTS_FA}" ] && run_transdecoder "${NUCL_TRANSCRIPTS_FA}" "${GENETIC_CODE_NUCL}" "nuclear"
 		fi
 		if [[ "$GENOME_TYPE" == "mito" || "$GENOME_TYPE" == "mixed" ]]; then
-			if [ -s "${MITO_TRANSCRIPTS_FA}" ]; then 
-		       run_transdecoder "${MITO_TRANSCRIPTS_FA}" "${GENETIC_CODE_MITO}" "mito"
-			else
-			   echo_yellow "Skipping TransDecoder, output exists or input transcript FASTA is empty." 
-			fi
+			[ -s "${MITO_TRANSCRIPTS_FA}" ] && run_transdecoder "${MITO_TRANSCRIPTS_FA}" "${GENETIC_CODE_MITO}" "mito"
 		fi
 		
 		echo_yellow "TransDecoder GFF3 will be merged in Step 10 by the R script."
 		
 		# Consolidate peptide predictions
-		local LONGEST_ORFS_PEP="${FUNCTIONAL_DIR}/longest_orfs.pep"
 		local LONGEST_ORFS_PEP_CLEAN="${FUNCTIONAL_DIR}/longest_orfs.pep.clean"
 		if [ ! -s "${LONGEST_ORFS_PEP_CLEAN}" ]; then
-			cat "${FUNCTIONAL_DIR}"/*.transdecoder.pep 2>/dev/null > "${LONGEST_ORFS_PEP}"
-			sed 's/\*//g' "${LONGEST_ORFS_PEP}" > "${LONGEST_ORFS_PEP_CLEAN}"
+			# Use find to be safer than a raw glob
+			find "${FUNCTIONAL_DIR}" -name "*.transdecoder.pep" -type f -exec cat {} + > "${FUNCTIONAL_DIR}/longest_orfs.pep"
+			sed 's/\*//g' "${FUNCTIONAL_DIR}/longest_orfs.pep" > "${LONGEST_ORFS_PEP_CLEAN}"
 			grep ">" "${LONGEST_ORFS_PEP_CLEAN}" | sed 's/>//' > "${FUNCTIONAL_DIR}/transcripts_with_orfs.txt"
 		else
 			echo_yellow "Skipping peptide consolidation, clean file exists."
 		fi
+		
 		if $NO_FUNCTIONAL; then
 			echo_yellow "[--noFunctionalPrediction] – skipping BLAST / Pfam / InterPro."
 			FUNCTIONAL_METHODS=""
@@ -1227,84 +1146,57 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 
 		# Download databases if needed
 		if [[ "$FUNCTIONAL_METHODS" =~ BLAST ]]; then
-			if [ -z "${BLAST_DB_SwissProt}" ]; then
-				BLAST_DB_SwissProt="${FUNCTIONAL_DIR}/blast_dbs/swissprot"
-				if [ ! -f "${BLAST_DB_SwissProt}.pin" ]; then
-					echo_green  "SwissProt database not found. Downloading..."
-					mkdir -p "${FUNCTIONAL_DIR}/blast_dbs"
-					if ! wget -T 15 -qO - "https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/uniprot_sprot.fasta.gz" | gunzip -c > "${FUNCTIONAL_DIR}/blast_dbs/swissprot.fasta"; then
-						echo_red "Error: Failed to download SwissProt database. Check network connection or disk space."
-						exit 1
-					fi
-					makeblastdb -in "${FUNCTIONAL_DIR}/blast_dbs/swissprot.fasta" -dbtype prot -out "${BLAST_DB_SwissProt}"
-				fi
+			BLAST_DB_SwissProt="${BLAST_DB_SwissProt:-${FUNCTIONAL_DIR}/blast_dbs/swissprot}"
+			if [ ! -f "${BLAST_DB_SwissProt}.pin" ]; then
+				echo_green  "SwissProt database not found. Downloading..."
+				mkdir -p "$(dirname "${BLAST_DB_SwissProt}")"
+				wget -T 15 -qO - "https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/uniprot_sprot.fasta.gz" | gunzip -c > "${BLAST_DB_SwissProt}.fasta"
+				makeblastdb -in "${BLAST_DB_SwissProt}.fasta" -dbtype prot -out "${BLAST_DB_SwissProt}"
 			fi
 		fi
-		
 		if [[ "$FUNCTIONAL_METHODS" == *"PFAM"* ]]; then
-			if [ -z "${PFAM_DB}" ]; then
-				local PFAM_DB_PATH="${PFAM_DB:-${FUNCTIONAL_DIR}/pfam_db}"
-				if [ ! -f "${PFAM_DB_PATH}/Pfam-A.hmm.h3m" ]; then
-					echo_green "Pfam database not found. Downloading..."
-					mkdir -p "${PFAM_DB_PATH}"
-					wget -T 15 -qO - "https://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.hmm.gz" | gunzip -c > "${PFAM_DB_PATH}/Pfam-A.hmm" || { echo_red "Pfam download failed."; exit 1; }
-					hmmpress "${PFAM_DB_PATH}/Pfam-A.hmm"
-				else
-					echo_green "Pfam database found. Skipping download."
-				fi
+			PFAM_DB_PATH="${PFAM_DB:-${FUNCTIONAL_DIR}/pfam_db}"
+			if [ ! -f "${PFAM_DB_PATH}/Pfam-A.hmm.h3m" ]; then
+				echo_green "Pfam database not found. Downloading..."
+				mkdir -p "${PFAM_DB_PATH}"
+				wget -T 15 -qO - "https://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.hmm.gz" | gunzip -c > "${PFAM_DB_PATH}/Pfam-A.hmm"
+				hmmpress "${PFAM_DB_PATH}/Pfam-A.hmm"
 			fi
 		fi
 
-		# Run homology searches if requested and peptides were predicted
+		# Run functional annotation tools
 		if [ -s "${LONGEST_ORFS_PEP_CLEAN}" ]; then
 			echo_green "Found $(grep -c '^>' ${LONGEST_ORFS_PEP_CLEAN}) predicted proteins for analysis."
-			if [[ "$FUNCTIONAL_METHODS" == *"BLASTp"* ]]; then
-				if [ -s "${FUNCTIONAL_DIR}/blastp_results.out" ]; then 
-				   echo_yellow "Skipping BLASTp, output exists." 
-				else
-				   echo_green "Running BLASTp..." 
-				   blastp -query "${LONGEST_ORFS_PEP_CLEAN}" -db "${BLAST_DB_SwissProt}" -outfmt 6 -num_threads "${THREADS}" -out "${FUNCTIONAL_DIR}/blastp_results.out"
-				fi
+			if [[ "$FUNCTIONAL_METHODS" == *"BLASTp"* ]] && [ ! -s "${FUNCTIONAL_DIR}/blastp_results.out" ]; then
+				echo_green "Running BLASTp..."
+				blastp -query "${LONGEST_ORFS_PEP_CLEAN}" -db "${BLAST_DB_SwissProt}" -outfmt 6 -num_threads "${THREADS}" -out "${FUNCTIONAL_DIR}/blastp_results.out"
 			fi
-			if [[ "$FUNCTIONAL_METHODS" == *"PFAM"* ]]; then
-				if [ -s "${FUNCTIONAL_DIR}/pfam_results.out" ]; then 
-				    echo_yellow "Skipping PFAM Scan, output exists." 
-				else
-					echo_green "Running PFAM Scan..." 
-					hmmscan --cpu "${THREADS}" --domtblout "${FUNCTIONAL_DIR}/pfam_results.out" "${PFAM_DB_PATH}/Pfam-A.hmm" "${LONGEST_ORFS_PEP_CLEAN}"
-				fi
+			if [[ "$FUNCTIONAL_METHODS" == *"PFAM"* ]] && [ ! -s "${FUNCTIONAL_DIR}/pfam_results.out" ]; then
+				echo_green "Running PFAM Scan..."
+				hmmscan --cpu "${THREADS}" --domtblout "${FUNCTIONAL_DIR}/pfam_results.out" "${PFAM_DB_PATH}/Pfam-A.hmm" "${LONGEST_ORFS_PEP_CLEAN}"
 			fi
-			if [[ "$FUNCTIONAL_METHODS" == *"INTERPRO"* ]]; then
-				if [ -s "${FUNCTIONAL_DIR}/interpro.tsv" ]; then 
-				   echo_yellow "Skipping InterProScan, output exists." 
-				else   
-				   echo_green "Running InterProScan..." 
-				   run_interproscan "${LONGEST_ORFS_PEP_CLEAN}" "${FUNCTIONAL_DIR}/interpro.tsv" "${THREADS}"
-				fi
+			if [[ "$FUNCTIONAL_METHODS" == *"INTERPRO"* ]] && [ ! -s "${FUNCTIONAL_DIR}/interpro.tsv" ]; then
+				echo_green "Running InterProScan..."
+				run_interproscan "${LONGEST_ORFS_PEP_CLEAN}" "${FUNCTIONAL_DIR}/interpro.tsv" "${THREADS}"
 			fi
 		else
 			echo_yellow "Warning: No proteins predicted. Skipping BLASTp, Pfam, InterProScan."
 		fi
 		
+		# CORRECTED: Create BLASTx input cleanly to prevent duplication on re-runs.
 		local ALL_TRANSCRIPTS_FA="${FUNCTIONAL_DIR}/all_transcripts.fa"
-		# Append each source file only if it exists
-		[ -f "${NUCL_TRANSCRIPTS_FA}" ] && cat "${NUCL_TRANSCRIPTS_FA}" >> "${ALL_TRANSCRIPTS_FA}"
-		[ -f "${MITO_TRANSCRIPTS_FA}" ] && cat "${MITO_TRANSCRIPTS_FA}" >> "${ALL_TRANSCRIPTS_FA}"
-		#cat "${NUCL_TRANSCRIPTS_FA}" "${MITO_TRANSCRIPTS_FA}" 2>/dev/null > "${ALL_TRANSCRIPTS_FA}"
+		rm -f "${ALL_TRANSCRIPTS_FA}" # Remove old file to prevent appending
+		find "${FUNCTIONAL_DIR}" -name "*_transcripts.fa" -type f -exec cat {} + > "${ALL_TRANSCRIPTS_FA}"
+
 		if [ -s "${ALL_TRANSCRIPTS_FA}" ]; then
-			if [[ "${FUNCTIONAL_METHODS}" == *"BLASTx"* ]]; then
-				if [ -s "${FUNCTIONAL_DIR}/blastx_results.out" ]; then 
-				   echo_yellow "Skipping BLASTx, output exists." 
-				else
-				   echo_green "Running BLASTx..." && blastx -query "${ALL_TRANSCRIPTS_FA}" -db "${BLAST_DB_SwissProt}" -outfmt 6 -num_threads "${THREADS}" -out "${FUNCTIONAL_DIR}/blastx_results.out"
-				fi
+			if [[ "${FUNCTIONAL_METHODS}" == *"BLASTx"* ]] && [ ! -s "${FUNCTIONAL_DIR}/blastx_results.out" ]; then
+				echo_green "Running BLASTx..."
+				blastx -query "${ALL_TRANSCRIPTS_FA}" -db "${BLAST_DB_SwissProt}" -outfmt 6 -num_threads "${THREADS}" -out "${FUNCTIONAL_DIR}/blastx_results.out"
 			fi
 		fi
 		
-
 		echo_blue  "Step 9 Completed: Functional Annotation"
 	}
-
 	# ---------------------------
 	# Step 10: Integrate Functional Annotation (R Script)
 	# ---------------------------
@@ -1362,7 +1254,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	MAX_TRANSCRIPT_LENGTH=100000
 	TRIM_QUAL=20
 	TRIM_LEN=20
-	DEEPSPLICE=false
+	#DEEPSPLICE=false
 	DEEPSPLICE_SPECIES=""
     DEEPSPLICE_THR=0.65	
     DSMODEL_DIR="$(dirname "$0")/DSmodels"
@@ -1414,11 +1306,11 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 			--MR_RB_gtf_dir) MR_RB_GTF_DIR="$2"; shift 2 ;;
 			--MR_DN_gtf_dir) MR_DN_GTF_DIR="$2"; shift 2 ;;
 			--blastDB_SwissProt) BLAST_DB_SwissProt="$2"; shift 2 ;;
-			--deepSpliceSpecies) DEEPSPLICE=true; DEEPSPLICE_SPECIES="$2"; shift 2 ;;
-			--noDeepSplice) DEEPSPLICE=false; shift ;;
+			--deepSpliceSpecies) DEEPSPLICE_SPECIES="$2"; shift 2 ;;
+			--noDeepSplice) DEEPSPLICE_SPECIES=""; DEEPSPLICE_GUIDE_USER=""; shift ;;
 			--deepSpliceThr) DEEPSPLICE_THR="$2"; shift 2 ;;
 			--junctionGuide) JUNCTION_GUIDE_USER="$2"; shift 2 ;;
-            --deepSpliceGuide) DEEPSPLICE=true; DEEPSPLICE_GUIDE_USER="$2"; shift 2 ;;
+            --deepSpliceGuide) DEEPSPLICE_GUIDE_USER="$2"; shift 2 ;;
 			--noFunctionalPrediction) NO_FUNCTIONAL=true; FUNCTIONAL_METHODS=""; shift ;;
 			--pfamDB) PFAM_DB="$2"; shift 2 ;;
 			--genomeType) GENOME_TYPE_USER="$2"; shift 2;;
