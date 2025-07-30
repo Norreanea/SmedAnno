@@ -99,14 +99,13 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		echo "  --trimQual N                 TrimGalore quality cutoff (Phred, default 20)"
 		echo "  --trimAdapter SEQ            Adapter sequence to remove               (default: auto-detection)"
 		echo "  --trimGzip                   Gzip-compress trimmed FASTQ              (default: FALSE)"
-		echo "  --trimLen N                  Minimum read length after trimming       (default: 20 bp.)"
+		echo "  --trimLen N                  Minimum read length after trimming       (default: 20 bp)"
 		echo "  --deepSpliceSpecies SPECIES   Enable DeepSplice splice-site guidance with one of:"
 		echo_green "Available DeepSplice species:"
         echo "                                human, mouse, zebrafish, honeybee, thalecress"
         echo "                               (Use the closest taxon; splice motifs are highly conserved, e.g. honey-bee works for most non-model metazoans)"
 		echo "  --deepSpliceThr FLOAT         Posterior cutoff passed to DeepSplice (default: 0.65)"
         echo "  --noDeepSplice                Skip DeepSplice (default behaviour)"
-		echo "  --junctionGuide PATH          Absolute path to a pre-computed junction GTF file to use as a guide"
 		echo "  --deepSpliceGuide PATH        Absolute path to a pre-computed DeepSplice GTF file to use as a guide"
 		echo "  --genomeType <type>           Specify the type of genome being processed. Options: 'nuclear', 'mito', 'mixed'."
 		echo "                                If not set, the script will auto-detect 'mixed' if headers match --mitoPattern."
@@ -782,58 +781,32 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 				corrected_mix_bams+=("${corrected_bam_path}")
 			fi
 		done
-		# Generate splice guides from RNA-seq alignments
-		local JUNCTION_GTF="${ASSEMBLY_DIR}/junctions_from_bams.gtf"
-		if [ -n "${JUNCTION_GUIDE_USER}" ]; then
-			echo_green "Using pre-computed junction guide from: ${JUNCTION_GUIDE_USER}"
-			[ ! -s "${JUNCTION_GUIDE_USER}" ] && { echo_red "Error: Provided junction guide is missing or empty: ${JUNCTION_GUIDE_USER}"; exit 1; }
-			cp "${JUNCTION_GUIDE_USER}" "${JUNCTION_GTF}"
-		else
-			echo_green "Generating splice-site guide from alignment (BAM) data..."
-			local all_corrected_bams=("${corrected_short_bams[@]}" "${corrected_mix_bams[@]}")
-			if [ ${#all_corrected_bams[@]} -gt 0 ]; then
-				local temp_bam_dir="${ASSEMBLY_DIR}/temp_bams_with_xs"
-				mkdir -p "${temp_bam_dir}"
-				local temp_merged_bam="${temp_bam_dir}/merged_for_junctions.bam"
-				TEMP_FILES+=("${temp_merged_bam}" "${temp_merged_bam}.bai")
-				
-				echo_green "Extracting splice junctions from all BAM files..."
-				samtools merge -f -@ "${THREADS}" "${temp_merged_bam}" "${all_corrected_bams[@]}"
-				samtools index -@ "${THREADS}" "${temp_merged_bam}"
-				
-				regtools junctions extract -a 8 -m 150 -M 500000 -s XS "${temp_merged_bam}" | \
-					awk 'BEGIN{OFS="\t"} $5 >= 3 {
-						chrom=$1; start=$2; end=$3; strand=$6; id="JUNC_"NR; gq="\042";
-						attrs="gene_id " gq id gq "; transcript_id " gq id gq ";";
-						exon1_attrs = attrs " exon_number " gq "1" gq ";";
-						exon2_attrs = attrs " exon_number " gq "2" gq ";";
-						printf "%s\tSmedAnno\ttranscript\t%d\t%d\t.\t%s\t.\t%s\n", chrom, start, end, strand, attrs;
-						printf "%s\tSmedAnno\texon\t%d\t%d\t.\t%s\t.\t%s\n", chrom, start, start, strand, exon1_attrs;
-						printf "%s\tSmedAnno\texon\t%d\t%d\t.\t%s\t.\t%s\n", chrom, end, end, strand, exon2_attrs;
-					}' > "${JUNCTION_GTF}"
-			fi
-		fi
+
 		# Generate or use pre-computed DeepSplice guides 
 		local DS_GUIDE_GTF="${ASSEMBLY_DIR}/splice_guides_deepsplice.gtf"
 		if [ -n "${DEEPSPLICE_GUIDE_USER}" ]; then
-			echo_green "Using pre-computed DeepSplice guide: ${DEEPSPLICE_GUIDE_USER}"
+			echo_green "Processing user-provided DeepSplice guide: ${DEEPSPLICE_GUIDE_USER}"
 			[ ! -s "${DEEPSPLICE_GUIDE_USER}" ] && { echo_red "Error: Provided DeepSplice guide is missing or empty."; exit 1; }
-			cp "${DEEPSPLICE_GUIDE_USER}" "${DS_GUIDE_GTF}"
+			
+			# Process the user's file to ensure it has the correct transcript/exon hierarchy.
+			gawk -F'\t' 'BEGIN{OFS="\t"} $3=="donor"||$3=="acceptor"||$3=="exon" {
+				id="DS_USER_"NR;
+				attrs="gene_id \""id"\"; transcript_id \""id"\";";
+				print $1, "DeepSplice", "transcript", $4, $5, $6, ".", ".", attrs;
+				print $1, "DeepSplice", "exon", $4, $5, $6, ".", ".", attrs;
+			}' "${DEEPSPLICE_GUIDE_USER}" > "${DS_GUIDE_GTF}"
 		elif [ -n "${DEEPSPLICE_SPECIES}" ]; then
 			echo_green "Running DeepSplice to generate splice-site guide..."
 			local DS_GUIDE_GFF="${ASSEMBLY_DIR}/splice_guides_raw.gff3"
 			python3 "$(dirname "$0")/deepsplice.py" --weights "${DSMODEL_DIR}/model_${DEEPSPLICE_SPECIES}.pt" --thr "${DEEPSPLICE_THR}" -o "${DS_GUIDE_GFF}" "${GENOME_REF}"
-			gawk -F'\t' '$3=="donor"||$3=="acceptor" {id="DS_"NR; printf "%s\tDeepSplice\texon\t%s\t%s\t%s\t.\t%s\tgene_id \"%s\"; transcript_id \"%s\";\n", $1,$4,$5,$6,$8,id,id}' "${DS_GUIDE_GFF}" > "${DS_GUIDE_GTF}"
-		fi
-		
-		# Pass 1 assembly 
-		# The guide option uses the junctions from BAMs
-		local GUIDE_OPT=""
-		if [ -s "${JUNCTION_GTF}" ]; then
-			GUIDE_OPT="-G ${JUNCTION_GTF}"
-			echo_green "Using RNA-seq junctions as the guide for initial assembly."
-		else
-			echo_yellow "Warning: No RNA-seq junctions found. Proceeding with unguided assembly."
+			gawk -F'\t' 'BEGIN{OFS="\t"} $3=="donor"||$3=="acceptor" {
+					id="DS_"NR;
+					attrs="gene_id \""id"\"; transcript_id \""id"\";";
+					# Print a parent transcript line
+					print $1, "DeepSplice", "transcript", $4, $5, $6, ".", ".", attrs;
+					# Print the corresponding exon line
+					print $1, "DeepSplice", "exon", $4, $5, $6, ".", ".", attrs;
+				}' "${DS_GUIDE_GFF}" > "${DS_GUIDE_GTF}"
 		fi
 
 		# Assemble short-read only samples
@@ -845,7 +818,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 				conda run -n ${ENV_SHORT} stringtie -p "${THREADS}" -G "${GENOME_GTF}" -c "${STRINGTIE2_COVERAGE}" -f "${STRINGTIE2_ABUNDANCE}" -o "${SR_RB_GTF_DIR_INTERNAL}/${sample}_SR_RB.gtf" "${bam_for_assembly}"
 			fi
 			echo_green "Running StringTie for de novo assembly (DN, SR)"
-			conda run -n ${ENV_SHORT} stringtie -p "${THREADS}" ${GUIDE_OPT} -c "${STRINGTIE2_COVERAGE}" -f "${STRINGTIE2_ABUNDANCE}" -o "${SR_DN_GTF_DIR_INTERNAL}/${sample}_SR_DN.gtf" "${bam_for_assembly}"
+			conda run -n ${ENV_SHORT} stringtie -p "${THREADS}" -c "${STRINGTIE2_COVERAGE}" -f "${STRINGTIE2_ABUNDANCE}" -o "${SR_DN_GTF_DIR_INTERNAL}/${sample}_SR_DN.gtf" "${bam_for_assembly}"
 		done
 
 		# Assemble mixed-read samples
@@ -860,7 +833,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 				conda run -n ${ENV_MIX} stringtie --mix -p "${THREADS}" -G "${GENOME_GTF}" -c "${STRINGTIE2_COVERAGE}" -f "${STRINGTIE2_ABUNDANCE}" -o "${MR_RB_GTF_DIR_INTERNAL}/${sample}_MR_RB.gtf" "${short_bam_for_assembly}" "${long_bam_for_assembly}"
 			fi
 			echo_green "Running StringTie for de novo assembly (DN, MR)"
-			conda run -n ${ENV_MIX} stringtie --mix -p "${THREADS}" ${GUIDE_OPT} -c "${STRINGTIE2_COVERAGE}" -f "${STRINGTIE2_ABUNDANCE}" -o "${MR_DN_GTF_DIR_INTERNAL}/${sample}_MR_DN.gtf" "${short_bam_for_assembly}" "${long_bam_for_assembly}"
+			conda run -n ${ENV_MIX} stringtie --mix -p "${THREADS}" -c "${STRINGTIE2_COVERAGE}" -f "${STRINGTIE2_ABUNDANCE}" -o "${MR_DN_GTF_DIR_INTERNAL}/${sample}_MR_DN.gtf" "${short_bam_for_assembly}" "${long_bam_for_assembly}"
 		done
 		echo_blue "Step 3 Completed: Gene and Transcript Assembly"
 	}
@@ -961,9 +934,22 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	# ---------------------------
 	step6_filter_transcripts() {
 		echo_blue "Starting Step 6: Filtering Transcripts"
-		local PREFINAL_GTF="${MERGE_DIR}/prefinal_annotation.gtf"
+		
+		local PREFINAL_GTF=""
+		local default_input="${MERGE_DIR}/prefinal_annotation.gtf"
+
+		if [[ -s "${default_input}" ]]; then
+			# Priority 1: Use the default output from Step 5 if it exists and is not empty.
+			PREFINAL_GTF="${default_input}"
+		elif [[ -n "${finalGTF}" && -s "${finalGTF}" ]]; then
+			# Priority 2: Fallback to the user-provided --finalGTF.
+			PREFINAL_GTF="${finalGTF}"
+		fi
+
+		[ -z "${PREFINAL_GTF}" ] && { echo_red "Error: Could not find a valid input GTF. Neither '${default_input}' nor a valid --finalGTF was found."; return 1; }
+		
+		echo_green "Filtering transcripts from: ${PREFINAL_GTF}"
 		local FILTERED_GTF="${MERGE_DIR}/filtered_annotation.gtf"
-		[ ! -f "${PREFINAL_GTF}" ] && { echo_red "Error: \"${PREFINAL_GTF}\" not found. Skipping filtering."; return; }
 
 		echo_green "Identifying transcripts with exons > ${MAX_EXON_LENGTH} nt or spans > ${MAX_TRANSCRIPT_LENGTH} nt"
 		
@@ -1002,8 +988,17 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	step7_isoform_comparison() {
 		echo_blue  "Starting Step 7: Isoform Comparison and Annotation"
 
-		local GTF_TO_COMPARE; GTF_TO_COMPARE=$([ -n "${finalGTF}" ] && echo "${finalGTF}" || echo "${MERGE_DIR}/filtered_annotation.gtf")
-		[ ! -f "${GTF_TO_COMPARE}" ] && { echo_red "GTF for comparison not found. Skipping Step 7."; return; }
+		local GTF_TO_COMPARE=""
+		local default_input="${MERGE_DIR}/filtered_annotation.gtf"
+
+		if [[ -s "${default_input}" ]]; then
+			GTF_TO_COMPARE="${default_input}"
+		elif [[ -n "${finalGTF}" && -s "${finalGTF}" ]]; then
+			GTF_TO_COMPARE="${finalGTF}"
+		fi
+
+		[ -z "${GTF_TO_COMPARE}" ] && { echo_red "Error: Could not find a valid input GTF for comparison."; return 1; }
+
 
 		local COMP_OUTPUT_PREFIX="${ANNOTATION_DIR}/gffcomp"
 		echo_green  "Running gffcompare on \"${GTF_TO_COMPARE}\""
@@ -1022,9 +1017,19 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	step8_gtf_correction() {
 		echo_blue  "Starting Step 8: GTF Correction and Enhancement"
 
-		local GTF_TO_CORRECT; GTF_TO_CORRECT=$([ -f "${ANNOTATION_DIR}/gffcomp.combined.gtf" ] && echo "${ANNOTATION_DIR}/gffcomp.combined.gtf" || echo "${MERGE_DIR}/filtered_annotation.gtf")
-		[ -n "${finalGTF}" ] && [ -f "${finalGTF}" ] && GTF_TO_CORRECT="${finalGTF}"
-		[ ! -f "${GTF_TO_CORRECT}" ] && { echo_red "No suitable GTF found for correction. Skipping Step 8."; return; }
+		local GTF_TO_CORRECT=""
+		local primary_default="${ANNOTATION_DIR}/gffcomp.combined.gtf"
+		local secondary_default="${MERGE_DIR}/filtered_annotation.gtf"
+
+		if [[ -s "${primary_default}" ]]; then
+			GTF_TO_CORRECT="${primary_default}"
+		elif [[ -s "${secondary_default}" ]]; then
+			GTF_TO_CORRECT="${secondary_default}"
+		elif [[ -n "${finalGTF}" && -s "${finalGTF}" ]]; then
+			GTF_TO_CORRECT="${finalGTF}"
+		fi
+		
+		[ -z "${GTF_TO_CORRECT}" ] && { echo_red "Error: Could not find a valid input GTF for correction."; return 1; }
 
 		local CORRECTED_GTF="${ANNOTATION_DIR}/corrected.gtf"
 		local CORRECTED_INTRONS_GTF="${ANNOTATION_DIR}/corrected_with_introns.gtf"
@@ -1045,8 +1050,17 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	step9_functional_annotation() {
 		echo_blue "Starting Step 9: Functional Annotation and Filtering"
 		
-		local ANNOTATED_GTF=$([ -n "${finalGTF}" ] && echo "${finalGTF}" || echo "${ANNOTATION_DIR}/corrected_with_introns.gtf")
-		[ ! -f "${ANNOTATED_GTF}" ] && { echo_red "No valid GTF file found for functional annotation. Skipping Step 9."; return 1; }
+		local ANNOTATED_GTF=""
+		local default_input="${ANNOTATION_DIR}/corrected_with_introns.gtf"
+
+		if [[ -s "${default_input}" ]]; then
+			ANNOTATED_GTF="${default_input}"
+		elif [[ -n "${finalGTF}" && -s "${finalGTF}" ]]; then
+			ANNOTATED_GTF="${finalGTF}"
+		fi
+		
+		[ -z "${ANNOTATED_GTF}" ] && { echo_red "No valid GTF file found for functional annotation."; return 1; }
+
 		echo_green "Using GTF file for annotation: \"${ANNOTATED_GTF}\""
 
 		local SANITIZED_GTF="${ANNOTATION_DIR}/sanitized.final.gtf"
@@ -1092,31 +1106,71 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 				echo_yellow "Skipping mitochondrial transcript extraction, file already exists."
 			fi
 		fi
-				
-		# CORRECTED: This helper function is now more robust.
+
 		run_transdecoder() {
 			local input_fasta="$1"; local genetic_code="$2"; local output_prefix="$3"
-			local final_pep_file="${FUNCTIONAL_DIR}/$(basename "${input_fasta}").transdecoder.pep"
-			
-			# Check if final output exists to skip the whole process
+
+			# Define final output paths in the main functional_annotation directory
+			local final_pep_file="${FUNCTIONAL_DIR}/${output_prefix}_transcripts.fa.transdecoder.pep"
+			local final_gff3_file="${FUNCTIONAL_DIR}/${output_prefix}_transcripts.fa.transdecoder.gff3"
+			local final_cds_file="${FUNCTIONAL_DIR}/${output_prefix}_transcripts.fa.transdecoder.cds"
+			local final_bed_file="${FUNCTIONAL_DIR}/${output_prefix}_transcripts.fa.transdecoder.bed"
+
 			if [ -s "${final_pep_file}" ]; then
-				echo_yellow "Skipping TransDecoder for $(basename "${input_fasta}"), final output exists."
+				echo_yellow "Skipping TransDecoder for ${output_prefix}, final output exists."
 				return 0
 			fi
-			
-			local genetic_code_cap=${genetic_code^}
-			echo_green "Running TransDecoder for '${output_prefix}' with genetic code '${genetic_code_cap}'..."
-			
-			# CORRECTED: Removed pushd/popd and use full path for robustness.
-			TransDecoder.LongOrfs -t "${input_fasta}" --genetic_code "${genetic_code_cap}" -O "${FUNCTIONAL_DIR}"
 
-			local predict_opts="--single_best_only"
-			# Conditionally add --no_refine_starts for mito transcripts to avoid training errors on small datasets
-			if [ "${output_prefix}" == "mito" ]; then
-				echo_yellow "Mitochondrial dataset detected. Skipping start site refinement in TransDecoder.Predict."
-				predict_opts+=" --no_refine_starts"
+			# Create an isolated directory for this TransDecoder run
+			local td_run_dir="${FUNCTIONAL_DIR}/${output_prefix}_transdecoder_run"
+			mkdir -p "${td_run_dir}"
+			TEMP_FILES+=("${td_run_dir}") # Add to trap for cleanup on exit
+			
+			# Sanitize FASTA headers and place the cleaned file into the run directory
+			local td_basename="transcripts.clean.fa"
+			local cleaned_fasta_path="${td_run_dir}/${td_basename}"
+			echo_green "Sanitizing FASTA headers from '${input_fasta}' into '${cleaned_fasta_path}' for TransDecoder..."
+			gawk '/^>/{print $1; next} {print}' "${input_fasta}" > "${cleaned_fasta_path}"
+			
+			# Execute TransDecoder within a subshell, changing the directory
+			(
+				cd "${td_run_dir}"
+
+				local genetic_code_cap=${genetic_code^}
+				echo_green "Running TransDecoder for '${output_prefix}' inside isolated directory: $(pwd)"
+				
+				# Run TransDecoder.LongOrfs; -t points to the basename, as we are in its directory
+				TransDecoder.LongOrfs -t "${td_basename}" -m "${MIN_ORF_LENGTH}" --genetic_code "${genetic_code_cap}"
+
+				local predict_opts="--single_best_only"
+				if [ "${output_prefix}" == "mito" ]; then
+					echo_yellow "Mitochondrial dataset detected. Skipping start site refinement in TransDecoder.Predict."
+					predict_opts+=" --no_refine_starts"
+				fi
+				# Run TransDecoder.Predict; -t points to the basename
+				TransDecoder.Predict -t "${td_basename}" --genetic_code "${genetic_code_cap}" ${predict_opts}
+			)
+
+			# Now check for the output file *inside* the isolated directory and move it
+			if [ -s "${td_run_dir}/${td_basename}.transdecoder.pep" ]; then
+				echo_green "Finalizing TransDecoder outputs for ${output_prefix}..."
+				mv "${td_run_dir}/${td_basename}.transdecoder.gff3" "${final_gff3_file}"
+				mv "${td_run_dir}/${td_basename}.transdecoder.pep" "${final_pep_file}"
+				mv "${td_run_dir}/${td_basename}.transdecoder.cds" "${final_cds_file}"
+				mv "${td_run_dir}/${td_basename}.transdecoder.bed" "${final_bed_file}"
+			else
+				echo_red   "-----------------------------------------------------------------"
+				echo_red   "FATAL ERROR: TransDecoder failed to predict any proteins for '${output_prefix}'."
+				echo_yellow "This is a common failure point. The most likely reasons are:"
+				echo_yellow "  1. Assembled transcripts are too fragmented."
+				echo_yellow "  2. The minimum ORF length threshold is too high for this dataset."
+				echo_yellow ""
+				echo_yellow "DIAGNOSTIC TEST: Re-run this pipeline specifically for steps 9 and 10,"
+				echo_yellow "but add the '--minOrfLength' flag with a lower value. For example:"
+				echo_yellow "  ./smedanno.sh --steps 9,10 --minOrfLength 30 [your other options]"
+				echo_red   "-----------------------------------------------------------------"
+				exit 1 # Exit with a clear error
 			fi
-			TransDecoder.Predict -t "${input_fasta}" --genetic_code "${genetic_code_cap}" ${predict_opts} -O "${FUNCTIONAL_DIR}"
 		}
 
 		if [[ "$GENOME_TYPE" == "nuclear" || "$GENOME_TYPE" == "mixed" ]]; then
@@ -1182,8 +1236,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		else
 			echo_yellow "Warning: No proteins predicted. Skipping BLASTp, Pfam, InterProScan."
 		fi
-		
-		# CORRECTED: Create BLASTx input cleanly to prevent duplication on re-runs.
+
 		local ALL_TRANSCRIPTS_FA="${FUNCTIONAL_DIR}/all_transcripts.fa"
 		rm -f "${ALL_TRANSCRIPTS_FA}" # Remove old file to prevent appending
 		find "${FUNCTIONAL_DIR}" -name "*_transcripts.fa" -type f -exec cat {} + > "${ALL_TRANSCRIPTS_FA}"
@@ -1309,7 +1362,6 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 			--deepSpliceSpecies) DEEPSPLICE_SPECIES="$2"; shift 2 ;;
 			--noDeepSplice) DEEPSPLICE_SPECIES=""; DEEPSPLICE_GUIDE_USER=""; shift ;;
 			--deepSpliceThr) DEEPSPLICE_THR="$2"; shift 2 ;;
-			--junctionGuide) JUNCTION_GUIDE_USER="$2"; shift 2 ;;
             --deepSpliceGuide) DEEPSPLICE_GUIDE_USER="$2"; shift 2 ;;
 			--noFunctionalPrediction) NO_FUNCTIONAL=true; FUNCTIONAL_METHODS=""; shift ;;
 			--pfamDB) PFAM_DB="$2"; shift 2 ;;
@@ -1387,39 +1439,44 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	SHORT_ONLY_SAMPLES=()
 	MIX_SAMPLES=()
 
-	# Discover samples from FASTQ data directories if provided
-	if [ -n "${DATA_DIR_SHORT}" ]; then
-		mapfile -t SHORT_ONLY_SAMPLES < <(find "${DATA_DIR_SHORT}" -maxdepth 1 -type f \( -name "*1.f*q*" -o -name "*2.f*q*" \) -printf "%f\n" | sed -E 's/(_R)?[12]\..*//;s/(_)[12]\..*//' | sort | uniq)
-	fi
-	if [ -n "${DATA_DIR_MIX}" ]; then
-		mapfile -t MIX_SAMPLES < <(find "${DATA_DIR_MIX}/short_reads" -maxdepth 1 -type f \( -name "*1.f*q*" -o -name "*2.f*q*" \) -printf "%f\n" | sed -E 's/(_R)?[12]\..*//;s/(_)[12]\..*//' | sort | uniq)
-	fi
-
-	# If no samples found from FASTQ, discover from pre-aligned BAM directories
-	if [ ${#SHORT_ONLY_SAMPLES[@]} -eq 0 ] && [ ${#MIX_SAMPLES[@]} -eq 0 ]; then
-		echo_green "No data directories provided. Discovering samples from BAM alignment directories..."
-		if [ -n "${ALIGN_DIR_SHORT}" ]; then
-			mapfile -t SHORT_ONLY_SAMPLES < <(find "${ALIGN_DIR_SHORT}" -maxdepth 1 -name "*.bam" -printf "%f\n" | sort )
+	# Discover samples if a relevant step (0-3) is being run
+	requires_samples=false
+	for step in "${STEPS_TO_RUN[@]}"; do
+		if [[ "$step" -le 3 ]]; then
+			requires_samples=true
+			break
 		fi
-		if [ -n "${ALIGN_DIR_MIX}" ]; then
-			mapfile -t MIX_SAMPLES < <(find "${ALIGN_DIR_MIX}" -maxdepth 1 -name "*.bam" -printf "%f\n" | sort )
-		fi
-	fi
+	done
 
-	if [ ${#SHORT_ONLY_SAMPLES[@]} -eq 0 ] && [ ${#MIX_SAMPLES[@]} -eq 0 ]; then
-		# This block runs only if no FASTQ files were found and we relied on alignDirs
-		if [ -n "${ALIGN_DIR_SHORT}" ]; then
-			echo_red "Error: --alignDirShort was provided, but no .bam files were found in that directory."
+	if [[ "$requires_samples" == true ]]; then
+		# Discover samples from FASTQ data directories if provided
+		if [ -n "${DATA_DIR_SHORT}" ]; then
+			mapfile -t SHORT_ONLY_SAMPLES < <(find "${DATA_DIR_SHORT}" -maxdepth 1 -type f \( -name "*1.f*q*" -o -name "*2.f*q*" \) -printf "%f\n" | sed -E 's/(_R)?[12]\..*//;s/(_)[12]\..*//' | sort | uniq)
+		fi
+		if [ -n "${DATA_DIR_MIX}" ]; then
+			mapfile -t MIX_SAMPLES < <(find "${DATA_DIR_MIX}/short_reads" -maxdepth 1 -type f \( -name "*1.f*q*" -o -name "*2.f*q*" \) -printf "%f\n" | sed -E 's/(_R)?[12]\..*//;s/(_)[12]\..*//' | sort | uniq)
+		fi
+
+		# If no samples found from FASTQ, discover from pre-aligned BAM directories
+		if [ ${#SHORT_ONLY_SAMPLES[@]} -eq 0 ] && [ ${#MIX_SAMPLES[@]} -eq 0 ]; then
+			echo_green "No data directories provided. Discovering samples from BAM alignment directories..."
+			if [ -n "${ALIGN_DIR_SHORT}" ]; then
+				mapfile -t SHORT_ONLY_SAMPLES < <(find "${ALIGN_DIR_SHORT}" -maxdepth 1 -name "*.bam" -printf "%f\n" | sort )
+			fi
+			if [ -n "${ALIGN_DIR_MIX}" ]; then
+				mapfile -t MIX_SAMPLES < <(find "${ALIGN_DIR_MIX}" -maxdepth 1 -name "*.bam" -printf "%f\n" | sort )
+			fi
+		fi
+
+		# Final check to ensure samples were found
+		if [ ${#SHORT_ONLY_SAMPLES[@]} -eq 0 ] && [ ${#MIX_SAMPLES[@]} -eq 0 ]; then
+			echo_red "Error: No sample files (FASTQ or BAM) were found in the provided directories."
 			exit 1
 		fi
-		if [ -n "${ALIGN_DIR_MIX}" ]; then
-			echo_red "Error: --alignDirMix was provided, but no .bam files were found in that directory."
-			exit 1
-		fi
+
+		[ "${#SHORT_ONLY_SAMPLES[@]}" -gt 0 ] && echo_green "Short-read-only samples detected: ${SHORT_ONLY_SAMPLES[*]}"
+		[ "${#MIX_SAMPLES[@]}" -gt 0 ] && echo_green "Mixed-read samples detected: ${MIX_SAMPLES[*]}"
 	fi
-	
-	[ "${#SHORT_ONLY_SAMPLES[@]}" -gt 0 ] && echo_green "Short-read-only samples detected: ${SHORT_ONLY_SAMPLES[*]}"
-	[ "${#MIX_SAMPLES[@]}" -gt 0 ] && echo_green "Mixed-read samples detected: ${MIX_SAMPLES[*]}"
 
     # ---------------------------
 	# Define Step Functions Mapping
