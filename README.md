@@ -20,7 +20,7 @@ SmedAnno is a robust and versatile RNA-Seq annotation pipeline designed to strea
 - **End-to-end analysis:** Covers all stages from read preprocessing and alignment to transcript assembly and functional annotation.
 - **Hybrid read support:** RNA-seq short reads (Illumina), long reads (PacBio/ONT), or a mix of both.
 - **Flexible assembly:** Performs both reference-based and de novo transcript assembly with StringTie.
-- **Splice-site guidance:** Automatically extracts splice junctions directly from alignment data (BAM files) to provide data-driven guidance for transcript assembly. Optionally, it can integrate *ab initio* predictions from DeepSplice for advanced splice site detection.
+- **Splice-site guidance:** Optionally, it can integrate *ab initio* predictions from DeepSplice for advanced splice site detection.
 - **Robust annotation:** Integrates results from TransDecoder, BLAST, HMMER (Pfam), and InterProScan to build a high-quality, functionally annotated gene set.
 - **Quality control:** The final step analyzes the annotation for structural and functional inconsistencies, flagging potentially fragmented or chimeric genes for manual review.
 - **Reproducible environment:** Packaged in a Docker container with all dependencies managed by Conda, ensuring maximum reproducibility.
@@ -132,7 +132,6 @@ All pipeline runs are initiated through the *run_smedanno.sh* wrapper script. Th
                    (Use the closest taxon; splice motifs are highly conserved, e.g. honey-bee works for most non-model metazoans)
 		   --deepSpliceThr FLOAT         Posterior cutoff passed to DeepSplice (default: 0.65)
                    --noDeepSplice                Skip DeepSplice (default behaviour)
-                   --junctionGuide PATH          Absolute path to a pre-computed junction GTF file to use as a guide
                    --deepSpliceGuide PATH        Absolute path to a pre-computed DeepSplice GTF file to use as a guide
 		   --genomeType <type>           Specify the type of genome being processed. Options: 'nuclear', 'mito', 'mixed'.
 		                                 If not set, the script will auto-detect 'mixed' if headers match --mitoPattern.
@@ -237,7 +236,7 @@ For a complete list of all available options and their descriptions, run:
 ./run_smedanno.sh --help
 ```
 
-The pipeline is divided into the following modular steps, which can be run all at once (--all) or selectively (--steps 1,2,3...).
+The pipeline is divided into the following modular steps, which can be run all at once (--all) or selectively (--steps 6,7,8...).
 
 - Step 0: Read Trimming / Quality-Filtering 
 - Step 1: rRNA Removal 
@@ -267,7 +266,7 @@ Upon successful execution, SmedAnno generates a structured output directory cont
 This project is licensed under the MIT License.
 
 ## Acknowledgements
-- **Bioinformatics tools:** SmedAnno integrates several powerful tools including Trim_Galore, Filtlong, STAR, minimap2, DeepSplice, StringTie2, AGAT, TransDecoder, BLAST, PFAM,  InterPro and several R libraries
+- **Bioinformatics tools:** SmedAnno integrates several powerful tools including Trim_Galore, Filtlong, STAR, minimap2, DeepSplice, StringTie2, AGAT, TransDecoder, BLAST, PFAM, InterPro and several R libraries
 - **Open-source community:** Special thanks to the developers and contributors of the open-source software utilized in this pipeline
   
 
